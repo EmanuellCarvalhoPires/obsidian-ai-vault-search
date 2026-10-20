@@ -1,0 +1,30 @@
+{
+  "name": "obsidian-ai-vault-search",
+  "version": "1.0.0",
+  "description": "Continuous indexing and ultra-fast hybrid search (graph + BM25 + semantic) for AI agents in Obsidian via AI Ecosystem.",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc --noEmit && node esbuild.config.mjs production",
+    "deploy": "npm run build && node scripts/deploy.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "obsidian",
+    "search",
+    "ai",
+    "rag",
+    "mcp",
+    "embeddings"
+  ],
+  "author": "Emanuell Pires",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^22.20.4",
+    "esbuild": "^0.28.2",
+    "obsidian": "^1.13.1",
+    "tslib": "^2.8.1",
+    "typescript": "^5.9.3"
+  }
+}
