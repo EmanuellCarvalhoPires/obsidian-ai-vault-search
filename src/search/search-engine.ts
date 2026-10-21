@@ -1,6 +1,7 @@
 // Fast memory engine that reads directly from Obsidian's app.metadataCache and vault
 import { TFile, TFolder } from "obsidian";
 import type { App, TAbstractFile } from "obsidian";
+import { isExcluded, normalizeFolders } from "./exclusion";
 import type { SearchMatch, SearchQueryParams, SearchResultPayload } from "./types";
 
 export const SINONIMOS: Set<string>[] = [
@@ -47,13 +48,33 @@ function isIgnored(path: string): boolean {
 }
 
 export class VaultSearchEngine {
+  private excludedFolders: string[] = [];
+
   constructor(private readonly app: App) {}
+
+  /** Vault-relative folders left out of every listing, search and section read. */
+  setExcludedFolders(folders: string[]): void {
+    this.excludedFolders = normalizeFolders(folders);
+  }
+
+  getExcludedFolders(): string[] {
+    return [...this.excludedFolders];
+  }
+
+  private ignored(path: string): boolean {
+    return isIgnored(path) || isExcluded(path, this.excludedFolders);
+  }
+
+  /** Markdown notes the search can see (same set the "buscar" action reads). */
+  getIndexedNotes(): TFile[] {
+    return this.getMarkdownFiles();
+  }
 
   private getMarkdownFiles(): TFile[] {
     return this.app.vault.getMarkdownFiles().filter((f) => {
       const p = f.path;
       return (
-        !isIgnored(p) &&
+        !this.ignored(p) &&
         !p.startsWith("MCP/Tools") &&
         !p.startsWith("MCP/Requests")
       );
@@ -116,12 +137,12 @@ export class VaultSearchEngine {
       const folders: SearchMatch[] = [];
 
       const collect = (item: TAbstractFile) => {
-        if (isIgnored(item.path)) return;
+        if (this.ignored(item.path)) return;
         if (item instanceof TFolder) {
           let filesCount = 0;
           let subfoldersCount = 0;
           for (const child of item.children) {
-            if (isIgnored(child.path)) continue;
+            if (this.ignored(child.path)) continue;
             if (child instanceof TFile) filesCount++;
             else if (child instanceof TFolder) subfoldersCount++;
           }
@@ -147,11 +168,11 @@ export class VaultSearchEngine {
           collect(targetFolder);
         } else {
           for (const child of targetFolder.children) {
-            if (child instanceof TFolder && !isIgnored(child.path)) {
+            if (child instanceof TFolder && !this.ignored(child.path)) {
               let filesCount = 0;
               let subfoldersCount = 0;
               for (const sub of child.children) {
-                if (isIgnored(sub.path)) continue;
+                if (this.ignored(sub.path)) continue;
                 if (sub instanceof TFile) filesCount++;
                 else if (sub instanceof TFolder) subfoldersCount++;
               }
@@ -187,7 +208,7 @@ export class VaultSearchEngine {
       const recursivo = params.recursivo === true;
       const limite = params.limite || 50;
 
-      let allFiles = this.app.vault.getFiles().filter((f) => !isIgnored(f.path));
+      let allFiles = this.app.vault.getFiles().filter((f) => !this.ignored(f.path));
       if (pasta) {
         const normPasta = pasta.replace(/\/$/, "");
         if (recursivo) {
@@ -234,7 +255,7 @@ export class VaultSearchEngine {
       const notaAlvo = String(params.nota || "").trim();
       const cabecalhoAlvo = params.cabecalho ? String(params.cabecalho).toLowerCase().trim() : undefined;
 
-      const files = this.app.vault.getMarkdownFiles();
+      const files = this.app.vault.getMarkdownFiles().filter((f) => !isExcluded(f.path, this.excludedFolders));
       const file = files.find(
         (f) => f.path === notaAlvo || f.basename.toLowerCase() === notaAlvo.toLowerCase()
       );
@@ -331,8 +352,8 @@ export class VaultSearchEngine {
     // -------------------------------------------------------------
     if (acao === "status") {
       const mdFiles = this.getMarkdownFiles();
-      const allFiles = this.app.vault.getFiles().filter((f) => !isIgnored(f.path));
-      const folders = this.app.vault.getAllLoadedFiles().filter((f) => f instanceof TFolder && !isIgnored(f.path));
+      const allFiles = this.app.vault.getFiles().filter((f) => !this.ignored(f.path));
+      const folders = this.app.vault.getAllLoadedFiles().filter((f) => f instanceof TFolder && !this.ignored(f.path));
 
       const tagCounts: Record<string, number> = {};
       for (const file of mdFiles) {
