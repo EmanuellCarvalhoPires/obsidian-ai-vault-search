@@ -1,9 +1,12 @@
 // AI Vault Search — Main Plugin Entry Point
 import { Plugin } from "obsidian";
 import { EcosystemConnector } from "./ecosystem/connector";
-import { AI_ECOSYSTEM_API_VERSION } from "./ecosystem/types";
-import type { HubModuleRegistration } from "./ecosystem/types";
+import { AI_ECOSYSTEM_API_VERSION, HOOKS_SERVICE } from "./ecosystem/types";
+import type { AIEcosystemAPI, HooksService, HubModuleRegistration } from "./ecosystem/types";
+import { DEFAULT_SETTINGS, loadSettings } from "./settings";
+import type { VaultSearchSettings } from "./settings";
 import { VaultSearchEngine } from "./search/search-engine";
+import { createSetupHandler, publishExcludedFolders } from "./setup/setup-handler";
 import { createSearchTools } from "./tools/search-tools";
 
 export const MODULE_ID = "ai-vault-search";
@@ -11,11 +14,16 @@ export const MODULE_ID = "ai-vault-search";
 export default class AIVaultSearchPlugin extends Plugin {
   private connector: EcosystemConnector | undefined;
   private engine: VaultSearchEngine | undefined;
+  private config: VaultSearchSettings = DEFAULT_SETTINGS;
+  private api: AIEcosystemAPI | undefined;
+  private unregisterSetupHandler: (() => void) | undefined;
 
   async onload(): Promise<void> {
     console.log("[AI Vault Search] Carregando plugin...");
 
+    this.config = loadSettings(await this.loadData());
     this.engine = new VaultSearchEngine(this.app);
+    this.engine.setExcludedFolders(this.config.pastasForaDoIndice);
 
     // Conecta ao barramento do AI Ecosystem
     this.connector = new EcosystemConnector(this, {
@@ -41,6 +49,18 @@ export default class AIVaultSearchPlugin extends Plugin {
           },
         ],
       }),
+      onConnected: (api) => {
+        this.api = api;
+        this.registerSetupHandler(api);
+        api.onServiceChange((name) => {
+          if (name === HOOKS_SERVICE) this.registerSetupHandler(api);
+        });
+      },
+      onDisconnected: () => {
+        this.api = undefined;
+        this.unregisterSetupHandler?.();
+        this.unregisterSetupHandler = undefined;
+      },
       onStatus: (status, detail) => {
         console.log(`[AI Vault Search] Status do AI Ecosystem: ${status}`, detail || "");
       },
@@ -51,9 +71,31 @@ export default class AIVaultSearchPlugin extends Plugin {
   }
 
   onunload(): void {
+    this.unregisterSetupHandler?.();
+    this.unregisterSetupHandler = undefined;
     if (this.connector) {
       this.connector.stop();
     }
     console.log("[AI Vault Search] Plugin descarregado.");
+  }
+
+  private registerSetupHandler(api: AIEcosystemAPI): void {
+    this.unregisterSetupHandler?.();
+    const hooks = api.getService<HooksService>(HOOKS_SERVICE);
+    publishExcludedFolders(hooks, MODULE_ID, this.config.pastasForaDoIndice);
+    this.unregisterSetupHandler = hooks?.registerSetupHandler(
+      MODULE_ID,
+      createSetupHandler({
+        indexedNotePaths: () => this.engine?.getIndexedNotes().map((f) => f.path) ?? [],
+        allFilePaths: () => this.app.vault.getFiles().map((f) => f.path),
+        getExcludedFolders: () => this.config.pastasForaDoIndice,
+        setExcludedFolders: async (folders) => {
+          this.config.pastasForaDoIndice = folders;
+          this.engine?.setExcludedFolders(folders);
+          await this.saveData(this.config);
+          if (this.api) publishExcludedFolders(this.api.getService<HooksService>(HOOKS_SERVICE), MODULE_ID, folders);
+        },
+      }),
+    );
   }
 }

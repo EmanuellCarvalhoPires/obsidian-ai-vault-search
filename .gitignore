@@ -1,0 +1,5 @@
+node_modules/
+*.map
+.deploy-target
+data.json
+.claude/
