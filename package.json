@@ -1,6 +1,6 @@
 {
   "name": "obsidian-ai-vault-search",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Continuous indexing and ultra-fast hybrid search (graph + BM25 + semantic) for AI agents in Obsidian via AI Ecosystem.",
   "main": "main.js",
   "private": true,
