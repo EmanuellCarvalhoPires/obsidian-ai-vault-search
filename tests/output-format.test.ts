@@ -17,7 +17,13 @@ function setup() {
     const res = await tools.find((t) => t.name === name)!.handler(args, {} as never);
     const first = res.content[0];
     const text = first.type === "text" ? first.text : "";
-    return { res, text, json: JSON.parse(text) as Record<string, any> };
+    let json: Record<string, any> = {};
+    try {
+      json = JSON.parse(text);
+    } catch {
+      // not JSON (e.g. plain text ripgrep output)
+    }
+    return { res, text, json };
   };
   return { call };
 }
@@ -80,5 +86,27 @@ describe("tool responses", () => {
     const { json } = await call("search_notes", { termos: ["inexistente"] });
     expect(json.total).toBe(0);
     expect(json.resultados).toEqual([]);
+  });
+
+  it("search_notes with compacto: true returns ripgrep formatted plain text (caminho:linha:trecho)", async () => {
+    const { call } = setup();
+    const { res, text } = await call("search_notes", { termos: ["acesso"], compacto: true });
+    expect(res.structuredContent).toBeUndefined();
+    // Plain text format caminho:linha:trecho, not JSON
+    expect(text.startsWith("{")).toBe(false);
+    expect(text).toContain("Fluxos/Fluxo A.md:");
+    expect(text).toContain("acesso ao jira");
+    const parts = text.split(":");
+    expect(parts.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("get_section supports line slice (linha_inicio, linha_fim) returning pure content without line number overhead", async () => {
+    const { call } = setup();
+    const sec = await call("get_section", { nota: "Fluxo A", linha_inicio: 6, linha_fim: 7 });
+    expect(sec.json.total).toBe(1);
+    expect(sec.json.resultados[0].linha).toBe(6);
+    expect(sec.json.resultados[0].conteudo).toBe("## Passos\nacesso ao jira");
+    // Verify no [L6] or [L7] prefixes inserted
+    expect(sec.json.resultados[0].conteudo).not.toContain("[L");
   });
 });

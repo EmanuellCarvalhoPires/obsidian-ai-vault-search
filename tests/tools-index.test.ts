@@ -51,6 +51,7 @@ describe("tools index metadata and schema optimization (Etapa 8)", () => {
     expect(props.prop).toBeDefined();
     expect(props.nota).toBeDefined();
     expect(props.secao).toBeDefined();
+    expect(props.compacto).toBeDefined();
     expect(props.limite).toBeDefined();
 
     // Removed legacy clutter

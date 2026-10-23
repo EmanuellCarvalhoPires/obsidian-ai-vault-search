@@ -31,6 +31,32 @@ export function jsonResult(payload: unknown): HubToolResult {
   return { content: [{ type: "text", text: JSON.stringify(compact(payload, true)) }] };
 }
 
+/** Formats search matches in ripgrep style: "caminho:linha:trecho". */
+export function formatRipgrep(resultados: Array<{
+  caminho?: string;
+  linha?: number;
+  trecho?: string;
+  secao_linha?: number;
+  secao_trecho?: string;
+  conteudo?: string;
+}>): string {
+  if (!resultados || resultados.length === 0) return "";
+  return resultados
+    .map((r) => {
+      const caminho = r.caminho || "";
+      const linha = r.linha ?? r.secao_linha ?? 1;
+      let trecho = r.trecho ?? r.secao_trecho ?? r.conteudo ?? "";
+      trecho = trecho.replace(/[\r\n]+/g, " ").trim();
+      return `${caminho}:${linha}:${trecho}`;
+    })
+    .join("\n");
+}
+
+export function ripgrepResult(payload: { resultados?: any[] }): HubToolResult {
+  const text = formatRipgrep(payload.resultados || []);
+  return { content: [{ type: "text", text }] };
+}
+
 export function errorResult(prefix: string, err: unknown): HubToolResult {
   return { isError: true, content: [{ type: "text", text: `${prefix}: ${String(err)}` }] };
 }

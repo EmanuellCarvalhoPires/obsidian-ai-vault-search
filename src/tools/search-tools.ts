@@ -3,7 +3,7 @@ import type { App } from "obsidian";
 import type { HubTool, HubToolResult } from "../ecosystem/types";
 import type { VaultSearchEngine } from "../search/search-engine";
 import type { SearchQueryParams } from "../search/types";
-import { errorResult, jsonResult } from "./format";
+import { errorResult, jsonResult, ripgrepResult } from "./format";
 
 export function createSearchTools(app: App, engine: VaultSearchEngine): HubTool[] {
   const searchNotesTool: HubTool = {
@@ -53,6 +53,11 @@ export function createSearchTools(app: App, engine: VaultSearchEngine): HubTool[
           default: true,
           description: "Inclui cabeçalho e trecho relevante da seção",
         },
+        compacto: {
+          type: "boolean",
+          default: false,
+          description: "Retorna linhas compactas estilo ripgrep (caminho:linha:trecho) para economia de tokens",
+        },
         limite: {
           type: "integer",
           default: 10,
@@ -72,6 +77,8 @@ export function createSearchTools(app: App, engine: VaultSearchEngine): HubTool[
           extensao: args.extensao as string | undefined,
           recursivo: args.recursivo === true,
           cabecalho: args.cabecalho as string | undefined,
+          linha_inicio: args.linha_inicio as number | undefined,
+          linha_fim: args.linha_fim as number | undefined,
           termos: args.termos as string[] | undefined,
           tag: args.tag as string | undefined,
           filhas: args.filhas as string | undefined,
@@ -84,6 +91,9 @@ export function createSearchTools(app: App, engine: VaultSearchEngine): HubTool[
         };
 
         const result = await engine.search(queryParams);
+        if (args.compacto === true) {
+          return ripgrepResult(result);
+        }
         return jsonResult(result);
       } catch (err) {
         return errorResult("Erro na execução do search_notes", err);
@@ -212,6 +222,14 @@ export function createSearchTools(app: App, engine: VaultSearchEngine): HubTool[
           type: "string",
           description: "Título da seção. Omitir para listar todos os cabeçalhos",
         },
+        linha_inicio: {
+          type: "integer",
+          description: "Linha inicial para leitura por intervalo (1-based)",
+        },
+        linha_fim: {
+          type: "integer",
+          description: "Linha final para leitura por intervalo (inclusiva)",
+        },
       },
       required: ["nota"],
     },
@@ -225,6 +243,8 @@ export function createSearchTools(app: App, engine: VaultSearchEngine): HubTool[
           acao: "obter_secao",
           nota: args.nota as string,
           cabecalho: args.cabecalho as string | undefined,
+          linha_inicio: args.linha_inicio as number | undefined,
+          linha_fim: args.linha_fim as number | undefined,
         };
         const result = await engine.search(queryParams);
         return jsonResult(result);

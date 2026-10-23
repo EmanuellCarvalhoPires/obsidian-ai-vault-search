@@ -269,6 +269,27 @@ export class VaultSearchEngine {
       const cache = this.app.metadataCache.getFileCache(file);
       const lines = content.split("\n");
 
+      // Suporte a intervalo de linhas (linha_inicio / linha_fim)
+      if (params.linha_inicio !== undefined || params.linha_fim !== undefined) {
+        const start = Math.max(1, params.linha_inicio ?? 1) - 1;
+        const end = Math.min(lines.length, params.linha_fim ?? lines.length);
+        const sliced = start < end ? lines.slice(start, end) : [];
+        return {
+          consulta: { acao, nota: file.basename, linha_inicio: start + 1, linha_fim: end },
+          total: 1,
+          tempo_ms: Date.now() - startTime,
+          resultados: [
+            {
+              tipo: "nota",
+              caminho: file.path,
+              nome: file.basename,
+              linha: start + 1,
+              conteudo: sliced.join("\n"),
+            },
+          ],
+        };
+      }
+
       if (!cabecalhoAlvo) {
         const headings = (cache?.headings || []).map((h) => ({
           nivel: h.level,

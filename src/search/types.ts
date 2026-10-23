@@ -42,6 +42,9 @@ export interface SearchQueryParams {
   limite?: number;
   modo?: "hibrido" | "exato" | "semantico";
   secao?: boolean;
+  compacto?: boolean;
+  linha_inicio?: number;
+  linha_fim?: number;
 }
 
 export interface SearchResultPayload {
