@@ -2,7 +2,7 @@
 import { Plugin } from "obsidian";
 import { EcosystemConnector } from "./ecosystem/connector";
 import { AI_ECOSYSTEM_API_VERSION, HOOKS_SERVICE } from "./ecosystem/types";
-import type { AIEcosystemAPI, HooksService, HubModuleRegistration } from "./ecosystem/types";
+import type { AIEcosystemAPI, HooksService, HubModuleRegistration, ToolIndexEntry } from "./ecosystem/types";
 import { DEFAULT_SETTINGS, loadSettings } from "./settings";
 import type { VaultSearchSettings } from "./settings";
 import { VaultSearchEngine } from "./search/search-engine";
@@ -52,6 +52,7 @@ export default class AIVaultSearchPlugin extends Plugin {
       onConnected: (api) => {
         this.api = api;
         this.registerSetupHandler(api);
+        this.syncToolIndex(api);
         api.onServiceChange((name) => {
           if (name === HOOKS_SERVICE) this.registerSetupHandler(api);
         });
@@ -97,5 +98,27 @@ export default class AIVaultSearchPlugin extends Plugin {
         },
       }),
     );
+  }
+
+  private syncToolIndex(api: AIEcosystemAPI | undefined = this.api): void {
+    if (!api?.toolIndex) return;
+    const tools = createSearchTools(this.app, this.engine!);
+    const entries: ToolIndexEntry[] = tools.map((t) => ({
+      name: t.name,
+      title: t.title,
+      description: t.description,
+      inputSchema: t.inputSchema,
+      annotations: t.annotations,
+      categoria: t.categoria,
+      tags: t.tags,
+      resumo: t.resumo,
+      efeito: t.efeito,
+      exposicao: t.exposicao,
+      aprovacao: t.aprovacao,
+      exemplo: t.exemplo,
+    }));
+    api.toolIndex.sync(MODULE_ID, entries).catch((err: unknown) => {
+      console.error("[AI Vault Search] Não foi possível sincronizar o índice de tools", err);
+    });
   }
 }

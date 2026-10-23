@@ -3,32 +3,38 @@ import type { App } from "obsidian";
 import type { HubTool, HubToolResult } from "../ecosystem/types";
 import type { VaultSearchEngine } from "../search/search-engine";
 import type { SearchQueryParams } from "../search/types";
+import { errorResult, jsonResult } from "./format";
 
 export function createSearchTools(app: App, engine: VaultSearchEngine): HubTool[] {
   const searchNotesTool: HubTool = {
     name: "search_notes",
     title: "Search Vault Notes & Content",
-    description:
-      "Busca híbrida de notas no cofre em tempo real na memória RAM do Obsidian (grafo de links, tags, BM25, frontmatter e seções de Markdown). Use prioritariamente para pesquisar termos, tags, notas-filhas (up:), backlinks e propriedades.",
+    description: "Busca híbrida de notas no cofre (grafo, tags, BM25, frontmatter e seções).",
+    categoria: "vault",
+    tags: ["vault", "busca", "notas", "grafo", "bm25"],
+    resumo: "Busca híbrida de notas no cofre por termos, tags, links ou frontmatter",
+    efeito: "leitura",
+    exposicao: "fixa",
+    aprovacao: "dispensada",
     inputSchema: {
       type: "object",
       properties: {
         termos: {
           type: "array",
           items: { type: "string" },
-          description: "Palavras-chave a buscar no conteúdo ou título das notas",
+          description: "Palavras-chave a buscar no conteúdo ou título",
         },
         tag: {
           type: "string",
-          description: "Filtra por tag (ex.: 'jira/instance', 'company/alfa')",
+          description: "Filtro por tag (ex.: 'jira/instance')",
         },
         filhas: {
           type: "string",
-          description: "Nome da nota-pai para listar filhas (propriedade up:)",
+          description: "Nome da nota-pai para listar filhas (up:)",
         },
         arvore: {
           type: "string",
-          description: "Nome da nota para listar descendentes a partir de um MOC",
+          description: "Nome da nota raiz para listar descendentes (MOC)",
         },
         backlinks: {
           type: "string",
@@ -36,43 +42,21 @@ export function createSearchTools(app: App, engine: VaultSearchEngine): HubTool[
         },
         prop: {
           type: "string",
-          description: "Filtra por chave/valor no frontmatter (ex.: 'epico=PROJ-4')",
+          description: "Filtro frontmatter (ex.: 'epico=PROJ-4')",
         },
         nota: {
           type: "string",
-          description: "Nome da nota ou caminho relativo para inspecionar metadados",
+          description: "Nome ou caminho da nota para inspecionar metadados",
         },
         secao: {
           type: "boolean",
           default: true,
-          description: "Se verdadeiro, inclui cabeçalho e snippet relevante na busca de notas",
+          description: "Inclui cabeçalho e trecho relevante da seção",
         },
         limite: {
           type: "integer",
           default: 10,
           description: "Máximo de resultados a retornar",
-        },
-        acao: {
-          type: "string",
-          enum: ["buscar", "listar_pastas", "listar_arquivos", "obter_secao", "status"],
-          default: "buscar",
-          description: "Ação a executar (padrão: 'buscar')",
-        },
-        pasta: {
-          type: "string",
-          description: "Pasta base para listar_pastas ou listar_arquivos",
-        },
-        extensao: {
-          type: "string",
-          description: "Extensão para listar_arquivos",
-        },
-        recursivo: {
-          type: "boolean",
-          description: "Se recursivo",
-        },
-        cabecalho: {
-          type: "string",
-          description: "Título da seção para obter_secao",
         },
       },
     },
@@ -100,25 +84,9 @@ export function createSearchTools(app: App, engine: VaultSearchEngine): HubTool[
         };
 
         const result = await engine.search(queryParams);
-        return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify(result, null, 2),
-            },
-          ],
-          structuredContent: result as unknown as Record<string, unknown>,
-        };
+        return jsonResult(result);
       } catch (err) {
-        return {
-          isError: true,
-          content: [
-            {
-              type: "text",
-              text: `Erro na execução do search_notes: ${String(err)}`,
-            },
-          ],
-        };
+        return errorResult("Erro na execução do search_notes", err);
       }
     },
   };
@@ -126,15 +94,20 @@ export function createSearchTools(app: App, engine: VaultSearchEngine): HubTool[
   const listFoldersTool: HubTool = {
     name: "list_folders",
     title: "List Vault Folders",
-    description:
-      "Lista as pastas do cofre e contagem de arquivos/subpastas diretamente pela API do Obsidian em RAM. Use prioritariamente para explorar a estrutura de diretórios do cofre.",
+    description: "Lista as pastas do cofre e contagem de arquivos e subpastas.",
+    categoria: "vault",
+    tags: ["vault", "pastas", "diretorios"],
+    resumo: "Lista pastas do cofre e contagem de itens",
+    efeito: "leitura",
+    exposicao: "indice",
+    aprovacao: "dispensada",
     inputSchema: {
       type: "object",
       properties: {
         pasta: {
           type: "string",
           default: "",
-          description: "Caminho da pasta base (vazio ou '/' para a raiz do cofre)",
+          description: "Pasta base (vazio ou '/' para a raiz)",
         },
         recursivo: {
           type: "boolean",
@@ -155,25 +128,9 @@ export function createSearchTools(app: App, engine: VaultSearchEngine): HubTool[
           recursivo: args.recursivo === true,
         };
         const result = await engine.search(queryParams);
-        return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify(result, null, 2),
-            },
-          ],
-          structuredContent: result as unknown as Record<string, unknown>,
-        };
+        return jsonResult(result);
       } catch (err) {
-        return {
-          isError: true,
-          content: [
-            {
-              type: "text",
-              text: `Erro na execução do list_folders: ${String(err)}`,
-            },
-          ],
-        };
+        return errorResult("Erro na execução do list_folders", err);
       }
     },
   };
@@ -181,20 +138,25 @@ export function createSearchTools(app: App, engine: VaultSearchEngine): HubTool[
   const listFilesTool: HubTool = {
     name: "list_files",
     title: "List Vault Files",
-    description:
-      "Lista arquivos do cofre por pasta e/ou extensão em RAM, com tamanho, data de modificação e tags. Use prioritariamente para descobrir e filtrar arquivos no cofre.",
+    description: "Lista arquivos do cofre por pasta e extensão com tamanho e data.",
+    categoria: "vault",
+    tags: ["vault", "arquivos", "extensao"],
+    resumo: "Lista arquivos do cofre por pasta e extensão",
+    efeito: "leitura",
+    exposicao: "indice",
+    aprovacao: "dispensada",
     inputSchema: {
       type: "object",
       properties: {
         pasta: {
           type: "string",
           default: "",
-          description: "Caminho da pasta (vazio para todas ou raiz)",
+          description: "Pasta base (vazio para todas ou raiz)",
         },
         extensao: {
           type: "string",
           default: "md",
-          description: "Extensão dos arquivos (ex.: 'md', 'png', 'py', '*' para todos)",
+          description: "Extensão dos arquivos (ex.: 'md', 'png', '*' para todos)",
         },
         recursivo: {
           type: "boolean",
@@ -222,25 +184,9 @@ export function createSearchTools(app: App, engine: VaultSearchEngine): HubTool[
           limite: (args.limite as number) || 50,
         };
         const result = await engine.search(queryParams);
-        return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify(result, null, 2),
-            },
-          ],
-          structuredContent: result as unknown as Record<string, unknown>,
-        };
+        return jsonResult(result);
       } catch (err) {
-        return {
-          isError: true,
-          content: [
-            {
-              type: "text",
-              text: `Erro na execução do list_files: ${String(err)}`,
-            },
-          ],
-        };
+        return errorResult("Erro na execução do list_files", err);
       }
     },
   };
@@ -248,18 +194,23 @@ export function createSearchTools(app: App, engine: VaultSearchEngine): HubTool[
   const getSectionTool: HubTool = {
     name: "get_section",
     title: "Get Note Section or Headings",
-    description:
-      "Lê uma seção específica ou lista os cabeçalhos de uma nota Markdown diretamente pela memória RAM do Obsidian. Sem 'cabecalho', lista todos os cabeçalhos da nota. Com 'cabecalho', extrai o conteúdo exato daquela seção.",
+    description: "Lê uma seção ou lista os cabeçalhos de uma nota Markdown.",
+    categoria: "vault",
+    tags: ["vault", "secao", "cabecalhos", "markdown"],
+    resumo: "Lê seção ou cabeçalhos de uma nota Markdown",
+    efeito: "leitura",
+    exposicao: "fixa",
+    aprovacao: "dispensada",
     inputSchema: {
       type: "object",
       properties: {
         nota: {
           type: "string",
-          description: "Nome da nota ou caminho relativo (ex.: 'CLAUDE' ou 'CLAUDE.md')",
+          description: "Nome ou caminho relativo da nota (ex.: 'CLAUDE.md')",
         },
         cabecalho: {
           type: "string",
-          description: "Título ou fragmento do cabeçalho markdown desejado. Se omitido, retorna a lista de todos os cabeçalhos disponíveis na nota.",
+          description: "Título da seção. Omitir para listar todos os cabeçalhos",
         },
       },
       required: ["nota"],
@@ -276,25 +227,9 @@ export function createSearchTools(app: App, engine: VaultSearchEngine): HubTool[
           cabecalho: args.cabecalho as string | undefined,
         };
         const result = await engine.search(queryParams);
-        return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify(result, null, 2),
-            },
-          ],
-          structuredContent: result as unknown as Record<string, unknown>,
-        };
+        return jsonResult(result);
       } catch (err) {
-        return {
-          isError: true,
-          content: [
-            {
-              type: "text",
-              text: `Erro na execução do get_section: ${String(err)}`,
-            },
-          ],
-        };
+        return errorResult("Erro na execução do get_section", err);
       }
     },
   };

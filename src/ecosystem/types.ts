@@ -1,10 +1,10 @@
-// Public contracts of the AI Ecosystem plugin that AI Scripts uses.
+// Public contracts of the AI Ecosystem plugin that AI Vault Search uses.
 //
-// Vendored from obsidian-ai-ecosystem (src/types/index.ts, Provider API version 1),
-// extended with optional stdin and signal fields on HubScriptOptions for streaming control.
+// Vendored from obsidian-ai-ecosystem (src/types/index.ts, Provider API version 1.1).
 
 /** Provider API version implemented by the AI Ecosystem this file was copied from. */
 export const AI_ECOSYSTEM_API_VERSION = 1;
+export const AI_ECOSYSTEM_API_MINOR_VERSION = 1;
 
 /** Plugin id of the AI Ecosystem. */
 export const ECOSYSTEM_ID = "ai-ecosystem";
@@ -97,7 +97,43 @@ export interface HubTool {
     idempotentHint?: boolean;
     openWorldHint?: boolean;
   };
+  /** Index metadata (API 1.1). */
+  categoria?: string;
+  tags?: string[];
+  resumo?: string;
+  efeito?: ToolEffect;
+  exposicao?: ToolExposure;
+  aprovacao?: string;
+  exemplo?: Record<string, unknown>;
   handler: (args: Record<string, unknown>, ctx: HubCallContext) => Promise<HubToolResult>;
+}
+
+// ---------------------------------------------------------------------------
+// Tool index (API 1.1)
+// ---------------------------------------------------------------------------
+
+export type ToolEffect = "leitura" | "cofre" | "externo";
+export type ToolExposure = "fixa" | "indice";
+export type ToolKind = "tool" | "script" | "template" | "api";
+
+export interface ToolIndexEntry {
+  name: string;
+  title?: string;
+  description: string;
+  inputSchema?: Record<string, unknown>;
+  annotations?: HubTool["annotations"];
+  kind?: ToolKind;
+  categoria?: string;
+  tags?: string[];
+  resumo?: string;
+  efeito?: ToolEffect;
+  exposicao?: ToolExposure;
+  aprovacao?: string;
+  exemplo?: Record<string, unknown>;
+}
+
+export interface ToolIndexApi {
+  sync(moduleId: string, entries: ToolIndexEntry[]): Promise<void>;
 }
 
 export interface HubPromptMessage {
@@ -227,6 +263,8 @@ export interface AIEcosystemAPI {
   }): void;
 
   getServerStatus(): { running: boolean; port: number; activeModules: string[] };
+
+  readonly toolIndex?: ToolIndexApi;
 }
 
 // ---------------------------------------------------------------------------

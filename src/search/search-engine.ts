@@ -152,8 +152,6 @@ export class VaultSearchEngine {
             nome: item.name || "raiz",
             total_arquivos: filesCount,
             total_subpastas: subfoldersCount,
-            modificada: "",
-            pontos: 100,
           });
           if (recursivo) {
             for (const child of item.children) {
@@ -182,8 +180,6 @@ export class VaultSearchEngine {
                 nome: child.name,
                 total_arquivos: filesCount,
                 total_subpastas: subfoldersCount,
-                modificada: "",
-                pontos: 100,
               });
             }
           }
@@ -236,7 +232,6 @@ export class VaultSearchEngine {
           tamanho_bytes: f.stat.size,
           modificada: new Date(f.stat.mtime).toLocaleString("pt-BR"),
           tags: Array.isArray(tags) ? tags : [tags],
-          pontos: 100,
         };
       });
 
@@ -290,7 +285,6 @@ export class VaultSearchEngine {
               caminho: file.path,
               nome: file.basename,
               cabecalhos_disponiveis: headings,
-              pontos: 100,
             },
           ],
         };
@@ -341,7 +335,6 @@ export class VaultSearchEngine {
             secao_titulo: foundHeading,
             secao_linha: startIndex + 1,
             conteudo: sectionLines.join("\n"),
-            pontos: 100,
           },
         ],
       };
@@ -375,7 +368,6 @@ export class VaultSearchEngine {
           nome: f.basename,
           caminho: f.path,
           modificada: new Date(f.stat.mtime).toLocaleString("pt-BR"),
-          pontos: 100,
         }));
 
       return {
@@ -412,7 +404,6 @@ export class VaultSearchEngine {
           tags: this.extractTags(f),
           up: this.extractUp(f),
           modificada: new Date(f.stat.mtime).toLocaleString("pt-BR"),
-          pontos: 100,
         })),
       };
     }
@@ -469,7 +460,7 @@ export class VaultSearchEngine {
       const cache = this.app.metadataCache.getFileCache(file);
       const frontmatter = cache?.frontmatter || {};
 
-      let pontos = 0;
+      let pontos: number | undefined = 0;
       let melhorLinha: number | undefined;
       let melhorTrecho: string | undefined;
       let secaoTitulo: string | undefined;
@@ -538,7 +529,7 @@ export class VaultSearchEngine {
           }
         }
       } else {
-        pontos = 10;
+        pontos = undefined;
       }
 
       results.push({
