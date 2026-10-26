@@ -13,3 +13,7 @@ export class TFolder {
   name = "";
   children: Array<TFile | TFolder> = [];
 }
+
+export async function loadPdfJs(): Promise<never> {
+  throw new Error("loadPdfJs não disponível nos testes");
+}

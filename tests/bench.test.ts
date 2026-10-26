@@ -60,7 +60,7 @@ it.skipIf(!process.env.BENCH)("measure", async () => {
   const lines: string[] = [];
   for (const [name, args] of calls) {
     const tool = tools.find((t) => t.name === name)!;
-    const res = await tool.handler(args);
+    const res = await tool.handler(args, {} as never);
     const bytes = res.content.reduce((n, c) => n + (c.type === "text" ? c.text.length : 0), 0);
     const structured = res.structuredContent ? JSON.stringify(res.structuredContent).length : 0;
     lines.push(`${name} ${JSON.stringify(args)} => text=${bytes} structured=${structured}`);

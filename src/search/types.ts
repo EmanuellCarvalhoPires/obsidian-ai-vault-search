@@ -14,13 +14,24 @@ export interface SearchMatch {
   secao_trecho?: string;
   skill?: boolean;
   efeito?: string;
-  tipo?: "nota" | "pasta" | "arquivo";
+  tipo?: "nota" | "pasta" | "arquivo" | "codigo" | "texto" | "tabela" | "documento";
   total_arquivos?: number;
   total_subpastas?: number;
   tamanho_bytes?: number;
   extensao?: string;
   conteudo?: string;
   cabecalhos_disponiveis?: { nivel: number; titulo: string; linha: number }[];
+  aba?: string;
+  celula?: string;
+  coluna?: string;
+  coluna_nome?: string;
+  valor?: string;
+  pagina?: number;
+  paragrafo?: number;
+  simbolo_envolvente?: string;
+  linha_inicio?: number;
+  linha_fim?: number;
+  simbolos_disponiveis?: { nome: string; tipo: string; linha: number }[];
 }
 
 export interface SearchQueryParams {
@@ -31,6 +42,7 @@ export interface SearchQueryParams {
   filtro?: string;
   pasta?: string;
   extensao?: string;
+  extensoes?: string[];
   recursivo?: boolean;
   cabecalho?: string;
   termos?: string[];

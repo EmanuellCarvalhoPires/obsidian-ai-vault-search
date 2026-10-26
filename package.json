@@ -9,6 +9,7 @@
     "build": "tsc --noEmit && node esbuild.config.mjs production",
     "deploy": "npm run build && node scripts/deploy.mjs",
     "typecheck": "tsc --noEmit",
+    "typecheck:tests": "tsc -p tsconfig.tests.json",
     "test": "vitest run"
   },
   "keywords": [
@@ -28,5 +29,8 @@
     "tslib": "^2.8.1",
     "typescript": "^5.9.3",
     "vitest": "^5.0.1"
+  },
+  "dependencies": {
+    "jszip": "3.10.1"
   }
 }

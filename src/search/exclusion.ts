@@ -18,10 +18,17 @@ export function normalizeFolders(folders: unknown): string[] {
   return [...out];
 }
 
-/** True when the path is one of the folders or inside one of them. */
+/** Lowercase with "/" separators: the disk ignores case on Windows, so the comparison does too. */
+function foldKey(value: string): string {
+  return value.replace(/\\/g, "/").toLowerCase();
+}
+
+/** True when the path is one of the folders or inside one of them (case-insensitive). */
 export function isExcluded(path: string, folders: readonly string[]): boolean {
+  const key = foldKey(path);
   for (const folder of folders) {
-    if (path === folder || path.startsWith(`${folder}/`)) return true;
+    const f = foldKey(folder);
+    if (key === f || key.startsWith(`${f}/`)) return true;
   }
   return false;
 }

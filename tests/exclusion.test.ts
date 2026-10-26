@@ -12,7 +12,7 @@ function file(path: string): TFile {
   f.name = path.split("/").pop() ?? path;
   f.extension = f.name.includes(".") ? (f.name.split(".").pop() ?? "") : "";
   f.basename = f.name.replace(/\.[^.]+$/, "");
-  f.stat = { mtime: 1, size: 1 };
+  f.stat = { ctime: 1, mtime: 1, size: 1 };
   return f;
 }
 
@@ -48,6 +48,15 @@ describe("exclusion filter", () => {
     expect(isExcluded("Anexos2/a.md", folders)).toBe(false);
     expect(isExcluded("MCP/Requests/a.md", folders)).toBe(false);
     expect(isExcluded("Notas/Anexos/a.md", folders)).toBe(false);
+  });
+
+  it("ignores letter case, since the disk does on Windows", () => {
+    const folders = ["Arquivo"];
+    expect(isExcluded("arquivo/x.md", folders)).toBe(true);
+    expect(isExcluded("ARQUIVO/x.md", folders)).toBe(true);
+    expect(isExcluded("arquivo", folders)).toBe(true);
+    expect(isExcluded("Arquivo2/x.md", folders)).toBe(false);
+    expect(isExcluded("Notas/Arquivo/x.md", folders)).toBe(false);
   });
 
   it("suggests the largest folders without repeating parents or excluded ones", () => {
