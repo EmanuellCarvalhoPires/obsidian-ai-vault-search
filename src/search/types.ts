@@ -24,7 +24,11 @@ export interface SearchMatch {
 }
 
 export interface SearchQueryParams {
-  acao?: "buscar" | "listar_pastas" | "listar_arquivos" | "obter_secao" | "status";
+  acao?: "buscar" | "listar_pastas" | "listar_arquivos" | "obter_secao" | "status" | "buscar_rapida";
+  query?: string;
+  padrao?: string;
+  titulo?: string;
+  filtro?: string;
   pasta?: string;
   extensao?: string;
   recursivo?: boolean;

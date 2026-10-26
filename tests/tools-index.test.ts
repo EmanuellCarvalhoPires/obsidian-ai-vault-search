@@ -9,9 +9,10 @@ describe("tools index metadata and schema optimization (Etapa 8)", () => {
   const engine = new VaultSearchEngine(app);
   const tools = createSearchTools(app, engine);
 
-  it("registers exactly 4 tools with correct vault category and reading effect", () => {
+  it("registers exactly 5 tools with correct vault category and reading effect", () => {
     expect(tools.map((t) => t.name)).toEqual([
       "search_notes",
+      "find_notes",
       "list_folders",
       "list_files",
       "get_section",
@@ -28,10 +29,14 @@ describe("tools index metadata and schema optimization (Etapa 8)", () => {
     }
   });
 
-  it("marks search_notes and get_section as exposicao: 'fixa' with shortened descriptions", () => {
+  it("marks search_notes, find_notes and get_section as exposicao: 'fixa' with shortened descriptions", () => {
     const searchNotes = tools.find((t) => t.name === "search_notes")!;
     expect(searchNotes.exposicao).toBe("fixa");
     expect(searchNotes.description.length).toBeLessThan(120);
+
+    const findNotes = tools.find((t) => t.name === "find_notes")!;
+    expect(findNotes.exposicao).toBe("fixa");
+    expect(findNotes.description.length).toBeLessThan(120);
 
     const getSection = tools.find((t) => t.name === "get_section")!;
     expect(getSection.exposicao).toBe("fixa");

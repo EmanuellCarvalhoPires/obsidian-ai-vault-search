@@ -122,9 +122,127 @@ export class VaultSearchEngine {
     return Array.from(new Set(cache.links.map((l) => l.link.replace(/[#^].*$/, "").trim())));
   }
 
+  async findNotes(params: {
+    query?: string;
+    padrao?: string;
+    pasta?: string;
+    limite?: number;
+    tag?: string;
+    extensao?: string;
+  }): Promise<SearchResultPayload> {
+    const startTime = Date.now();
+    const rawQuery = (params.query || params.padrao || "").trim();
+    const pasta = (params.pasta || "").trim().replace(/\/$/, "");
+    const limite = params.limite && params.limite > 0 ? params.limite : 10;
+    const ext = (params.extensao || "md").toLowerCase();
+
+    let files =
+      ext === "md"
+        ? this.getMarkdownFiles()
+        : this.app.vault.getFiles().filter((f) => !this.ignored(f.path) && (ext === "*" || f.extension.toLowerCase() === ext));
+
+    if (pasta) {
+      files = files.filter((f) => f.path.startsWith(pasta + "/") || f.path === pasta);
+    }
+
+    if (params.tag) {
+      const tagAlvo = norm(params.tag.replace(/^#/, "").replace(/\/$/, ""));
+      files = files.filter((f) => {
+        const tags = this.extractTags(f).map((t) => norm(t));
+        return tags.some((t) => t === tagAlvo || t.startsWith(tagAlvo + "/"));
+      });
+    }
+
+    const normQuery = norm(rawQuery);
+    const tokens = normQuery
+      .split(/\s+/)
+      .filter((t) => t.length > 0);
+
+    interface ScoredMatch {
+      file: TFile;
+      pontos: number;
+    }
+
+    let scored: ScoredMatch[] = [];
+
+    if (tokens.length === 0) {
+      scored = files.map((f) => ({ file: f, pontos: 0 }));
+      scored.sort((a, b) => b.file.stat.mtime - a.file.stat.mtime);
+    } else {
+      for (const file of files) {
+        const normBase = norm(file.basename);
+        const normPath = norm(file.path);
+
+        let baseMatchCount = 0;
+        let totalMatchCount = 0;
+
+        for (const token of tokens) {
+          const inBase = normBase.includes(token);
+          const inPath = normPath.includes(token);
+          if (inBase) baseMatchCount++;
+          if (inBase || inPath) totalMatchCount++;
+        }
+
+        if (totalMatchCount === 0) continue;
+
+        let pontos = 0;
+        if (baseMatchCount === tokens.length) {
+          pontos = 100;
+          if (normBase === normQuery) {
+            pontos += 50;
+          } else if (normBase.includes(normQuery)) {
+            pontos += 30;
+          }
+          pontos -= Math.min(normBase.length, 25);
+        } else if (totalMatchCount === tokens.length) {
+          pontos = 60;
+          if (normPath.includes(normQuery)) pontos += 15;
+        } else {
+          pontos = Math.round((totalMatchCount / tokens.length) * 40);
+        }
+
+        scored.push({ file, pontos: Math.max(1, pontos) });
+      }
+
+      scored.sort((a, b) => {
+        if (b.pontos !== a.pontos) return b.pontos - a.pontos;
+        return b.file.stat.mtime - a.file.stat.mtime;
+      });
+    }
+
+    const total = scored.length;
+    const slice = scored.slice(0, limite);
+
+    const resultados: SearchMatch[] = slice.map(({ file, pontos }) => ({
+      tipo: "nota",
+      caminho: file.path,
+      nome: file.basename,
+      tags: this.extractTags(file),
+      up: this.extractUp(file),
+      pontos: tokens.length > 0 ? pontos : undefined,
+      modificada: new Date(file.stat.mtime).toLocaleString("pt-BR"),
+    }));
+
+    return {
+      consulta: {
+        acao: "buscar_rapida",
+        query: rawQuery,
+        pasta: pasta || "/",
+        limite,
+      },
+      total,
+      tempo_ms: Date.now() - startTime,
+      resultados,
+    };
+  }
+
   async search(params: SearchQueryParams): Promise<SearchResultPayload> {
     const startTime = Date.now();
     const acao = params.acao || "buscar";
+
+    if (acao === "buscar_rapida") {
+      return this.findNotes(params);
+    }
 
     // -------------------------------------------------------------
     // AÇÃO 1: Listar Pastas
@@ -215,6 +333,10 @@ export class VaultSearchEngine {
       }
       if (ext !== "*") {
         allFiles = allFiles.filter((f) => f.extension.toLowerCase() === ext);
+      }
+      if (params.filtro) {
+        const normFiltro = norm(params.filtro);
+        allFiles = allFiles.filter((f) => norm(f.name).includes(normFiltro));
       }
 
       allFiles.sort((a, b) => b.stat.mtime - a.stat.mtime);
@@ -410,6 +532,11 @@ export class VaultSearchEngine {
     // -------------------------------------------------------------
     const files = this.getMarkdownFiles();
     let candidates = files;
+
+    if (params.titulo) {
+      const tituloAlvo = norm(params.titulo);
+      candidates = candidates.filter((f) => norm(f.basename).includes(tituloAlvo));
+    }
 
     if (params.nota) {
       const alvo = norm(params.nota);

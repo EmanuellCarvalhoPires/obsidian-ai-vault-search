@@ -109,4 +109,21 @@ describe("tool responses", () => {
     // Verify no [L6] or [L7] prefixes inserted
     expect(sec.json.resultados[0].conteudo).not.toContain("[L");
   });
+  it("find_notes: matches notes by title rapidly without reading content", async () => {
+    const { call } = setup();
+    const { json, text } = await call("find_notes", { query: "Fluxo" });
+    expect(text).not.toContain("\n");
+    expect(json.total).toBe(2);
+    expect(json.resultados[0].nome).toBe("Fluxo A");
+    expect(json.resultados[0].caminho).toBe("Fluxos/Fluxo A.md");
+    expect(json.resultados[0].pontos).toBeGreaterThan(0);
+  });
+
+  it("find_notes with compacto: true returns ripgrep formatted plain text", async () => {
+    const { call } = setup();
+    const { res, text } = await call("find_notes", { query: "Tools", compacto: true });
+    expect(res.structuredContent).toBeUndefined();
+    expect(text.startsWith("{")).toBe(false);
+    expect(text).toContain("MOC - Tools.md:");
+  });
 });

@@ -9,7 +9,7 @@ export function createSearchTools(app: App, engine: VaultSearchEngine): HubTool[
   const searchNotesTool: HubTool = {
     name: "search_notes",
     title: "Search Vault Notes & Content",
-    description: "Busca híbrida de notas no cofre (grafo, tags, BM25, frontmatter e seções).",
+    description: "Busca híbrida no CONTEÚDO das notas (texto, seções, BM25, tags, grafo). Para o que está escrito dentro.",
     categoria: "vault",
     tags: ["vault", "busca", "notas", "grafo", "bm25"],
     resumo: "Busca híbrida de notas no cofre por termos, tags, links ou frontmatter",
@@ -23,6 +23,10 @@ export function createSearchTools(app: App, engine: VaultSearchEngine): HubTool[
           type: "array",
           items: { type: "string" },
           description: "Palavras-chave a buscar no conteúdo ou título",
+        },
+        titulo: {
+          type: "string",
+          description: "Filtro por título/nome da nota (para buscar apenas por nome, prefira find_notes)",
         },
         tag: {
           type: "string",
@@ -86,6 +90,7 @@ export function createSearchTools(app: App, engine: VaultSearchEngine): HubTool[
           backlinks: args.backlinks as string | undefined,
           prop: args.prop as string | undefined,
           nota: args.nota as string | undefined,
+          titulo: args.titulo as string | undefined,
           secao: args.secao !== false,
           limite: (args.limite as number) || 10,
         };
@@ -97,6 +102,66 @@ export function createSearchTools(app: App, engine: VaultSearchEngine): HubTool[
         return jsonResult(result);
       } catch (err) {
         return errorResult("Erro na execução do search_notes", err);
+      }
+    },
+  };
+
+  const findNotesTool: HubTool = {
+    name: "find_notes",
+    title: "Quick Find Notes by Title",
+    description: "Busca rápida de notas por título ou caminho (Quick Switcher). Para achar notas pelo nome sem ler o conteúdo.",
+    categoria: "vault",
+    tags: ["vault", "busca", "rapida", "titulo", "switcher"],
+    resumo: "Busca rápida de notas por título ou caminho no cofre",
+    efeito: "leitura",
+    exposicao: "fixa",
+    aprovacao: "dispensada",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "Termo ou padrão a buscar no título ou caminho da nota (ex.: 'Plano de implementação', 'PROJ')",
+        },
+        pasta: {
+          type: "string",
+          description: "Pasta base opcional para restringir a busca",
+        },
+        tag: {
+          type: "string",
+          description: "Filtro opcional por tag",
+        },
+        limite: {
+          type: "integer",
+          default: 10,
+          description: "Máximo de resultados a retornar",
+        },
+        compacto: {
+          type: "boolean",
+          default: false,
+          description: "Retorna linhas compactas estilo ripgrep (caminho:linha:trecho) para economia de tokens",
+        },
+      },
+      required: ["query"],
+    },
+    annotations: {
+      readOnlyHint: true,
+      idempotentHint: true,
+    },
+    handler: async (args: Record<string, unknown>): Promise<HubToolResult> => {
+      try {
+        const result = await engine.findNotes({
+          query: (args.query as string) || (args.padrao as string) || "",
+          pasta: args.pasta as string | undefined,
+          tag: args.tag as string | undefined,
+          limite: (args.limite as number) || 10,
+        });
+        if (args.compacto === true) {
+          return ripgrepResult(result);
+        }
+        return jsonResult(result);
+      } catch (err) {
+        return errorResult("Erro na execução do find_notes", err);
       }
     },
   };
@@ -173,6 +238,10 @@ export function createSearchTools(app: App, engine: VaultSearchEngine): HubTool[
           default: false,
           description: "Se verdadeiro, pesquisa também nas subpastas",
         },
+        filtro: {
+          type: "string",
+          description: "Filtro opcional por nome ou padrão de arquivo (case-insensitive)",
+        },
         limite: {
           type: "integer",
           default: 50,
@@ -190,6 +259,7 @@ export function createSearchTools(app: App, engine: VaultSearchEngine): HubTool[
           acao: "listar_arquivos",
           pasta: (args.pasta as string) || "",
           extensao: (args.extensao as string) || "md",
+          filtro: args.filtro as string | undefined,
           recursivo: args.recursivo === true,
           limite: (args.limite as number) || 50,
         };
@@ -254,5 +324,5 @@ export function createSearchTools(app: App, engine: VaultSearchEngine): HubTool[
     },
   };
 
-  return [searchNotesTool, listFoldersTool, listFilesTool, getSectionTool];
+  return [searchNotesTool, findNotesTool, listFoldersTool, listFilesTool, getSectionTool];
 }
