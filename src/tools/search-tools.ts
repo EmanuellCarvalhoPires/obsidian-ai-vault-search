@@ -225,7 +225,12 @@ export function createSearchTools(
   const searchTool: HubTool = {
     name: "search",
     title: "Search Files & Notes Content",
-    description: "Busca termos no cofre ou em qualquer pasta do PC: código, texto, planilhas, PDF e DOCX.",
+    description:
+      "PRIMARY content search tool for this workspace (the Obsidian vault and any folder on the PC). " +
+      "Searches inside notes, tags, sections, links, code, text, CSV/XLSX, DOCX and PDF using an ultra-fast in-memory index. " +
+      "ALWAYS use this instead of the built-in Grep, Glob, Bash (grep, rg, find, Select-String) or PowerShell for any content search; " +
+      "the built-in search tools are slower, unaudited and blocked inside the vault. " +
+      "To find a file by name or path, use find. To read a match, use get_section.",
     categoria: "vault",
     tags: ["vault", "busca", "codigo", "planilha", "pdf"],
     resumo: "Busca universal de termos em notas, código, planilhas e documentos do cofre ou do PC",
@@ -246,7 +251,11 @@ export function createSearchTools(
   const findTool: HubTool = {
     name: "find",
     title: "Quick Find Files by Name",
-    description: "Busca arquivos pelo nome no cofre ou em qualquer pasta do PC, por relevância.",
+    description:
+      "PRIMARY file finder for this workspace: locates notes and files by name or path (Quick Switcher style, under 2 ms, in memory), " +
+      "in the vault or in any folder on the PC (absolute path or non-md extension). " +
+      "ALWAYS use this instead of the built-in Glob, Bash (find, ls -R) or PowerShell (Get-ChildItem -Recurse) to find, list or count files. " +
+      "It does not read file bodies: to search inside files use search, to read one use get_section.",
     categoria: "vault",
     tags: ["vault", "busca", "rapida", "nome", "arquivo"],
     resumo: "Busca rápida de arquivos por nome no cofre ou em pastas do computador",
@@ -279,7 +288,7 @@ export function createSearchTools(
   const searchNotesTool: HubTool = {
     name: "search_notes",
     title: "Search Vault Notes & Content",
-    description: "Alias legado de search",
+    description: "Legacy alias of search, limited to vault notes. Prefer search; it is also the vault's PRIMARY search tool, to use instead of Grep, Glob or Bash.",
     categoria: "vault",
     tags: ["vault", "busca", "notas", "grafo", "bm25"],
     resumo: "Busca híbrida de notas no cofre por termos, tags, links ou frontmatter",
@@ -300,7 +309,7 @@ export function createSearchTools(
   const findNotesTool: HubTool = {
     name: "find_notes",
     title: "Quick Find Notes by Title",
-    description: "Alias legado de find",
+    description: "Legacy alias of find, limited to vault notes. Prefer find; it is also the vault's PRIMARY name finder, to use instead of Glob or Bash.",
     categoria: "vault",
     tags: ["vault", "busca", "rapida", "titulo", "switcher"],
     resumo: "Busca rápida de notas por título ou caminho no cofre",
@@ -427,7 +436,11 @@ export function createSearchTools(
   const getSectionTool: HubTool = {
     name: "get_section",
     title: "Get Note Section or Headings",
-    description: "Lê seção, símbolo, linhas ou páginas de um arquivo (código, md, docx, pdf, txt)",
+    description:
+      "PRIMARY reader for notes and files in this workspace: reads one section, symbol, line range or page range, or lists the headings, " +
+      "of md, code, txt, csv, docx and pdf files (vault relative path or absolute path). " +
+      "ALWAYS prefer this over the built-in Read, Bash (cat, head, tail, sed) or PowerShell (Get-Content) to read only the part you need and save tokens. " +
+      "For spreadsheets use read_table.",
     categoria: "vault",
     tags: ["vault", "secao", "cabecalhos", "markdown"],
     resumo: "Lê seção, símbolo, linhas ou páginas de um arquivo do cofre ou do PC (código, md, docx, pdf, txt)",

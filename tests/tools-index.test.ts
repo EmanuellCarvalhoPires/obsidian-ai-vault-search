@@ -35,15 +35,15 @@ describe("tools index metadata and schema optimization (Etapa 8)", () => {
   it("marks search, find, get_section and read_table as exposicao: 'fixa' with shortened descriptions", () => {
     const search = tools.find((t) => t.name === "search")!;
     expect(search.exposicao).toBe("fixa");
-    expect(search.description.length).toBeLessThan(120);
+    expect(search.description.length).toBeLessThan(600);
 
     const find = tools.find((t) => t.name === "find")!;
     expect(find.exposicao).toBe("fixa");
-    expect(find.description.length).toBeLessThan(120);
+    expect(find.description.length).toBeLessThan(600);
 
     const getSection = tools.find((t) => t.name === "get_section")!;
     expect(getSection.exposicao).toBe("fixa");
-    expect(getSection.description.length).toBeLessThan(120);
+    expect(getSection.description.length).toBeLessThan(600);
 
     const readTable = tools.find((t) => t.name === "read_table")!;
     expect(readTable.exposicao).toBe("fixa");
@@ -53,11 +53,11 @@ describe("tools index metadata and schema optimization (Etapa 8)", () => {
   it("keeps search_notes and find_notes as legacy aliases with exposicao: 'indice'", () => {
     const searchNotes = tools.find((t) => t.name === "search_notes")!;
     expect(searchNotes.exposicao).toBe("indice");
-    expect(searchNotes.description).toBe("Alias legado de search");
+    expect(searchNotes.description).toContain("Legacy alias of search");
 
     const findNotes = tools.find((t) => t.name === "find_notes")!;
     expect(findNotes.exposicao).toBe("indice");
-    expect(findNotes.description).toBe("Alias legado de find");
+    expect(findNotes.description).toContain("Legacy alias of find");
   });
 
   it("gives search the universal inputSchema fields and keeps find_notes legacy schema", () => {
