@@ -1,8 +1,14 @@
 // Universal search: finds terms inside code, text, spreadsheets and documents, in the vault or any folder on the computer.
-import { walkFiles } from "./fs-walker";
+import { MAX_ARQUIVOS_PADRAO, walkFiles } from "./fs-walker";
 import { isExcluded } from "./exclusion";
-import { carregarConteudo, type Conteudo, type ConteudoDeps } from "./file-content";
+import {
+  carregarConteudo,
+  excedeLimiteDeTamanho,
+  type Conteudo,
+  type ConteudoDeps,
+} from "./file-content";
 import { tipoDoArquivo } from "./extensions";
+import { ehCaminhoBloqueado, redigirMatch } from "./protecao";
 import { displayPath, relativoAoCofre, resolveScope, toAbsolute } from "./path-resolver";
 import { cellRef, columnLetter } from "./tabular-parser";
 import { normalizar, searchText } from "./text-search";
@@ -52,7 +58,7 @@ function coletar(
   const cheio = (): boolean => saida.length >= limite;
 
   if (conteudo.tipo === "codigo" || conteudo.tipo === "texto" || conteudo.tipo === "nota") {
-    const trechos = searchText((conteudo.linhas ?? []).join("\n"), termos, {
+    const trechos = searchText(conteudo.linhas ?? [], termos, {
       extensao: dados.extensao,
       max: TRECHOS_POR_ARQUIVO,
     });
@@ -186,6 +192,7 @@ export async function searchUniversal(
   }
 
   const raiz = toAbsolute(escopo, ctx.basePath);
+  if (ehCaminhoBloqueado(raiz)) return vazio();
   const ignorarRel =
     relBase === undefined
       ? undefined
@@ -196,15 +203,26 @@ export async function searchUniversal(
   const caminhoDe = (abs: string): string =>
     escopo.tipo === "fs" ? abs.replace(/\\/g, "/") : displayPath(abs, ctx.basePath);
 
+  // One result more than the limit is collected, to tell whether the answer was cut.
   const resultados: SearchMatch[] = [];
+  let cortadoPorArquivos = false;
+  let ignoradosPorTamanho = 0;
   const varredura = walkFiles(raiz, {
     extensoes: p.extensoes,
     recursivo: p.recursivo,
     ignorarRel,
+    aoCortar: () => {
+      cortadoPorArquivos = true;
+    },
   });
   for await (const arq of varredura) {
-    if (resultados.length >= p.limite) break;
+    if (ehCaminhoBloqueado(arq.abs)) continue;
+    if (resultados.length > p.limite) break;
     if (tipoDoArquivo(arq.extensao) === "outro") continue;
+    if (excedeLimiteDeTamanho(arq.extensao, arq.tamanho)) {
+      ignoradosPorTamanho += 1;
+      continue;
+    }
 
     const conteudo = await carregarConteudo(
       { abs: arq.abs, extensao: arq.extensao, tamanho: arq.tamanho, mtime: arq.mtime },
@@ -222,14 +240,32 @@ export async function searchUniversal(
       },
       conteudo,
       termos,
-      p.limite,
+      p.limite + 1,
     );
+  }
+
+  const truncado = resultados.length > p.limite;
+  if (truncado) resultados.splice(p.limite);
+
+  const dicas: string[] = [];
+  if (truncado) {
+    dicas.push(`Resultados limitados a ${p.limite}; há mais. Refine os termos ou aumente limite.`);
+  }
+  if (ignoradosPorTamanho > 0) {
+    dicas.push(
+      `${ignoradosPorTamanho} arquivo(s) acima do limite de tamanho (5 MB texto, 50 MB binário) não foram lidos.`,
+    );
+  }
+  if (cortadoPorArquivos) {
+    dicas.push(`A varredura parou em ${MAX_ARQUIVOS_PADRAO} arquivos; restrinja pasta ou extensoes.`);
   }
 
   return {
     consulta,
     total: resultados.length,
-    resultados,
+    resultados: resultados.map(redigirMatch),
+    ...(truncado ? { truncado: true } : {}),
+    ...(dicas.length > 0 ? { dicas } : {}),
     tempo_ms: Date.now() - inicio,
   };
 }

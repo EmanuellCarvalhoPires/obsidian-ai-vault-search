@@ -2,6 +2,7 @@
 import * as path from "node:path";
 import { isExcluded } from "./exclusion";
 import { walkFiles } from "./fs-walker";
+import { ehCaminhoBloqueado } from "./protecao";
 import { displayPath, relativoAoCofre, resolveScope, toAbsolute } from "./path-resolver";
 import { normalizar } from "./text-search";
 import type { SearchMatch, SearchResultPayload } from "./types";
@@ -12,13 +13,21 @@ export interface BuscaNomeParams {
   extensoes: string[];
   pasta?: string;
   limite: number;
+  offset?: number;
 }
 
-// Scores a file by its name (without extension) and path. Returns 0 when no token matches.
-export function pontuarNome(nomeBase: string, caminho: string, query: string): number {
+export interface PontuacaoNome {
+  pontos: number;
+  // Query terms that matched the name or the path.
+  casados: number;
+  tokens: number;
+}
+
+// Scores a file by its name (without extension) and path. Pontos is 0 when no token matches.
+export function pontuarNomeDetalhado(nomeBase: string, caminho: string, query: string): PontuacaoNome {
   const normQuery = normalizar(query);
   const tokens = normQuery.split(/\s+/).filter((t) => t.length > 0);
-  if (tokens.length === 0) return 0;
+  if (tokens.length === 0) return { pontos: 0, casados: 0, tokens: 0 };
 
   const normBase = normalizar(nomeBase);
   const normCaminho = normalizar(caminho);
@@ -30,7 +39,7 @@ export function pontuarNome(nomeBase: string, caminho: string, query: string): n
     if (noNome) casadosNoNome++;
     if (noNome || normCaminho.includes(token)) casadosTotal++;
   }
-  if (casadosTotal === 0) return 0;
+  if (casadosTotal === 0) return { pontos: 0, casados: 0, tokens: tokens.length };
 
   let pontos: number;
   if (casadosNoNome === tokens.length) {
@@ -47,13 +56,27 @@ export function pontuarNome(nomeBase: string, caminho: string, query: string): n
   } else {
     pontos = Math.round((casadosTotal / tokens.length) * 40);
   }
-  return Math.max(1, pontos);
+  return { pontos: Math.max(1, pontos), casados: casadosTotal, tokens: tokens.length };
+}
+
+// Same score as pontuarNomeDetalhado, just the number.
+export function pontuarNome(nomeBase: string, caminho: string, query: string): number {
+  return pontuarNomeDetalhado(nomeBase, caminho, query).pontos;
+}
+
+// With a full match, drops hits that matched less than half the terms. Otherwise no filter.
+export function filtrarBaixaPontuacao<T extends { casados: number; tokens: number }>(achados: T[]): T[] {
+  const temCompleto = achados.some((a) => a.casados === a.tokens);
+  if (!temCompleto) return achados;
+  return achados.filter((a) => a.casados * 2 >= a.tokens);
 }
 
 interface Achado {
   resultado: SearchMatch;
   pontos: number;
   mtime: number;
+  casados: number;
+  tokens: number;
 }
 
 // Finds files whose name or path matches the query, in every folder under the scope. Stops at `limite` results.
@@ -90,6 +113,7 @@ export async function findUniversal(
   }
 
   const raiz = toAbsolute(escopo, ctx.basePath);
+  if (ehCaminhoBloqueado(raiz)) return vazio();
   const ignorarRel =
     relBase === undefined
       ? undefined
@@ -101,18 +125,20 @@ export async function findUniversal(
     escopo.tipo === "fs" ? abs.replace(/\\/g, "/") : displayPath(abs, ctx.basePath);
 
   const temQuery = normalizar(p.query) !== "";
-  const achados: Achado[] = [];
+  let achados: Achado[] = [];
   const varredura = walkFiles(raiz, {
     extensoes: p.extensoes,
     recursivo: true,
     ignorarRel,
   });
   for await (const arq of varredura) {
+    if (ehCaminhoBloqueado(arq.abs)) continue;
     const nomeBase = path.parse(arq.nome).name;
-    const pontos = temQuery
-      ? pontuarNome(nomeBase, displayPath(arq.abs, ctx.basePath), p.query)
-      : 0;
-    if (temQuery && pontos === 0) continue;
+    const detalhe = temQuery
+      ? pontuarNomeDetalhado(nomeBase, displayPath(arq.abs, ctx.basePath), p.query)
+      : { pontos: 0, casados: 0, tokens: 0 };
+    if (temQuery && detalhe.pontos === 0) continue;
+    const pontos = detalhe.pontos;
 
     const resultado: SearchMatch = {
       tipo: "arquivo",
@@ -123,17 +149,22 @@ export async function findUniversal(
       modificada: new Date(arq.mtime).toLocaleString("pt-BR"),
     };
     if (temQuery) resultado.pontos = pontos;
-    achados.push({ resultado, pontos, mtime: arq.mtime });
+    achados.push({ resultado, pontos, mtime: arq.mtime, casados: detalhe.casados, tokens: detalhe.tokens });
   }
 
+  // Without a query there is no score to filter on.
+  if (temQuery) achados = filtrarBaixaPontuacao(achados);
   achados.sort((a, b) => b.pontos - a.pontos || b.mtime - a.mtime);
   const total = achados.length;
-  const resultados = achados.slice(0, p.limite).map((a) => a.resultado);
+  const offset = Math.max(0, Math.floor(p.offset ?? 0));
+  const resultados = achados.slice(offset, offset + p.limite).map((a) => a.resultado);
+  const restantes = Math.max(0, total - offset - resultados.length);
 
   return {
     consulta,
     total,
     resultados,
+    ...(restantes > 0 ? { restantes } : {}),
     tempo_ms: Date.now() - inicio,
   };
 }

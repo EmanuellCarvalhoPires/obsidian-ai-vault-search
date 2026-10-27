@@ -1,7 +1,7 @@
 {
   "name": "obsidian-ai-vault-search",
-  "version": "1.2.0",
-  "description": "Continuous indexing and ultra-fast hybrid search (graph + BM25 + semantic) for AI agents in Obsidian via AI Ecosystem.",
+  "version": "2.0.0",
+  "description": "Continuous indexing and fast search (note graph + Markdown sections, BM25 ranking) for AI agents in Obsidian via AI Ecosystem.",
   "main": "main.js",
   "private": true,
   "scripts": {
@@ -17,8 +17,7 @@
     "search",
     "ai",
     "rag",
-    "mcp",
-    "embeddings"
+    "mcp"
   ],
   "author": "Emanuell Pires",
   "license": "MIT",

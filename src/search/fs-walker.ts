@@ -36,9 +36,10 @@ export interface OpcoesVarredura {
   recursivo: boolean;
   maxArquivos?: number;
   ignorarRel?: (relDir: string) => boolean;
+  aoCortar?: () => void;
 }
 
-const MAX_ARQUIVOS_PADRAO = 20000;
+export const MAX_ARQUIVOS_PADRAO = 20000;
 
 // Walks a real folder on disk and yields files that match the options.
 // Read errors are swallowed: the walker skips the entry and keeps going.
@@ -54,7 +55,6 @@ export async function* walkFiles(
   let devolvidos = 0;
 
   while (pilha.length > 0) {
-    if (devolvidos >= limite) return;
     const atual = pilha.pop();
     if (!atual) break;
 
@@ -68,7 +68,6 @@ export async function* walkFiles(
     const subpastas: Array<{ abs: string; rel: string }> = [];
     try {
       for await (const entrada of entradas) {
-        if (devolvidos >= limite) break;
         const abs = path.join(atual.abs, entrada.name);
         const rel = atual.rel === "" ? entrada.name : `${atual.rel}/${entrada.name}`;
 
@@ -92,6 +91,11 @@ export async function* walkFiles(
         }
         if (!info.isFile()) continue;
 
+        // Only a matching file beyond the limit counts as a cut: exactly one warning.
+        if (devolvidos >= limite) {
+          opts.aoCortar?.();
+          return;
+        }
         devolvidos += 1;
         yield {
           abs: abs.replace(/\\/g, "/"),

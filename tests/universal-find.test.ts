@@ -2,7 +2,12 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { findUniversal, pontuarNome } from "../src/search/universal-find";
+import {
+  filtrarBaixaPontuacao,
+  findUniversal,
+  pontuarNome,
+  pontuarNomeDetalhado,
+} from "../src/search/universal-find";
 
 const pasta = fs.mkdtempSync(path.join(os.tmpdir(), "avs-"));
 
@@ -99,5 +104,78 @@ describe("findUniversal com pastas excluidas e caminho absoluto", () => {
   it("caminho absoluto fora do cofre nao sofre as exclusoes", async () => {
     const r = await comExclusao(outro);
     expect(r.resultados.some((x) => x.caminho.endsWith("Arquivo/excl-fora.ts"))).toBe(true);
+  });
+});
+
+describe("findUniversal descarta baixa pontuacao quando ha casamento completo", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "avs-baixa-"));
+
+  beforeAll(() => {
+    for (const nome of [
+      "Comparativo de Eficiencia.txt",
+      "Eficiencia Comparativo.txt",
+      "Comparativo Eficiencia x.txt",
+      "relatorio de vendas.txt",
+      "Comparativo vendas.txt",
+    ]) {
+      fs.writeFileSync(path.join(dir, nome), "x");
+    }
+  });
+
+  afterAll(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  const buscarAqui = (query: string) =>
+    findUniversal(
+      { query, extensoes: ["txt"], pasta: dir, limite: 50 },
+      { basePath: dir, excluidas: [] },
+    );
+
+  it("com casamento completo, mantem quem casou pelo menos metade dos termos e corta o resto", async () => {
+    const r = await buscarAqui("Comparativo de Eficiencia");
+    expect(r.resultados.map((x) => x.nome).sort()).toEqual([
+      "Comparativo Eficiencia x.txt",
+      "Comparativo de Eficiencia.txt",
+      "Eficiencia Comparativo.txt",
+    ]);
+    expect(r.total).toBe(3);
+  });
+
+  it("sem nenhum casamento completo, os parciais continuam aparecendo", async () => {
+    const r = await buscarAqui("zzz vendas");
+    expect(r.resultados.map((x) => x.nome).sort()).toEqual([
+      "Comparativo vendas.txt",
+      "relatorio de vendas.txt",
+    ]);
+    expect(r.total).toBe(2);
+  });
+
+  it("sem consulta nao filtra nada", async () => {
+    const r = await buscarAqui("");
+    expect(r.total).toBe(5);
+  });
+
+  it("pontuarNomeDetalhado devolve casados e tokens do casamento completo", () => {
+    const d = pontuarNomeDetalhado("Comparativo de Eficiencia", "Comparativo de Eficiencia.txt", "Comparativo de Eficiencia");
+    expect(d.casados).toBe(3);
+    expect(d.tokens).toBe(3);
+    expect(d.pontos).toBe(pontuarNome("Comparativo de Eficiencia", "Comparativo de Eficiencia.txt", "Comparativo de Eficiencia"));
+  });
+
+  it("filtrarBaixaPontuacao remove quem casou 1 de 3 quando ha um completo", () => {
+    const entrada = [
+      { id: "completo", casados: 3, tokens: 3 },
+      { id: "parcial", casados: 1, tokens: 3 },
+    ];
+    expect(filtrarBaixaPontuacao(entrada).map((x) => x.id)).toEqual(["completo"]);
+  });
+
+  it("filtrarBaixaPontuacao nao filtra quando nao ha casamento completo", () => {
+    const entrada = [
+      { id: "a", casados: 1, tokens: 3 },
+      { id: "b", casados: 2, tokens: 3 },
+    ];
+    expect(filtrarBaixaPontuacao(entrada)).toHaveLength(2);
   });
 });

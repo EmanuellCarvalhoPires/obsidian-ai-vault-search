@@ -9,15 +9,16 @@ describe("tools index metadata and schema optimization (Etapa 8)", () => {
   const engine = new VaultSearchEngine(app);
   const tools = createSearchTools(app, engine);
 
-  it("registers exactly 8 tools with correct vault category and reading effect", () => {
+  it("registers exactly 9 tools with correct vault category and reading effect", () => {
     expect(tools.map((t) => t.name)).toEqual([
       "search",
       "find",
-      "search_notes",
-      "find_notes",
       "list_folders",
       "list_files",
+      "list_tags",
+      "recent_notes",
       "get_section",
+      "get_note",
       "read_table",
     ]);
 
@@ -50,33 +51,18 @@ describe("tools index metadata and schema optimization (Etapa 8)", () => {
     expect(readTable.description.length).toBeLessThan(120);
   });
 
-  it("keeps search_notes and find_notes as legacy aliases with exposicao: 'indice'", () => {
-    const searchNotes = tools.find((t) => t.name === "search_notes")!;
-    expect(searchNotes.exposicao).toBe("indice");
-    expect(searchNotes.description).toContain("Legacy alias of search");
-
-    const findNotes = tools.find((t) => t.name === "find_notes")!;
-    expect(findNotes.exposicao).toBe("indice");
-    expect(findNotes.description).toContain("Legacy alias of find");
-  });
-
-  it("gives search the universal inputSchema fields and keeps find_notes legacy schema", () => {
+  it("gives search the universal inputSchema fields", () => {
     const search = tools.find((t) => t.name === "search")!;
     const props = search.inputSchema.properties as Record<string, unknown>;
     expect(props.pasta).toBeDefined();
     expect(props.extensoes).toBeDefined();
     expect(props.extensao).toBeDefined();
     expect(props.recursivo).toBeDefined();
-
-    const findNotes = tools.find((t) => t.name === "find_notes")!;
-    const findProps = findNotes.inputSchema.properties as Record<string, unknown>;
-    expect(findProps.extensoes).toBeUndefined();
-    expect(findNotes.inputSchema.required).toEqual(["query"]);
   });
 
-  it("optimizes search_notes inputSchema by removing redundant legacy fields", () => {
-    const searchNotes = tools.find((t) => t.name === "search_notes")!;
-    const props = searchNotes.inputSchema.properties as Record<string, unknown>;
+  it("keeps the search inputSchema free of the hidden action and of the legacy cabecalho", () => {
+    const search = tools.find((t) => t.name === "search")!;
+    const props = search.inputSchema.properties as Record<string, unknown>;
 
     // Kept parameters
     expect(props.termos).toBeDefined();
@@ -90,11 +76,8 @@ describe("tools index metadata and schema optimization (Etapa 8)", () => {
     expect(props.compacto).toBeDefined();
     expect(props.limite).toBeDefined();
 
-    // Removed legacy clutter
+    // Removed clutter
     expect(props.acao).toBeUndefined();
-    expect(props.pasta).toBeUndefined();
-    expect(props.extensao).toBeUndefined();
-    expect(props.recursivo).toBeUndefined();
     expect(props.cabecalho).toBeUndefined();
   });
 
@@ -106,7 +89,7 @@ describe("tools index metadata and schema optimization (Etapa 8)", () => {
     expect(listFiles.exposicao).toBe("indice");
   });
 
-  it("syncs all 8 tools to toolIndex with expected shape", async () => {
+  it("syncs all 9 tools to toolIndex with expected shape", async () => {
     const syncMock = vi.fn().mockResolvedValue(undefined);
     const mockApi = {
       toolIndex: {
@@ -135,10 +118,12 @@ describe("tools index metadata and schema optimization (Etapa 8)", () => {
     expect(syncMock).toHaveBeenCalledWith("ai-vault-search", expect.arrayContaining([
       expect.objectContaining({ name: "search", exposicao: "fixa", efeito: "leitura" }),
       expect.objectContaining({ name: "find", exposicao: "fixa", efeito: "leitura" }),
-      expect.objectContaining({ name: "search_notes", exposicao: "indice", efeito: "leitura" }),
       expect.objectContaining({ name: "get_section", exposicao: "fixa", efeito: "leitura" }),
+      expect.objectContaining({ name: "get_note", exposicao: "indice", efeito: "leitura" }),
       expect.objectContaining({ name: "list_folders", exposicao: "indice", efeito: "leitura" }),
       expect.objectContaining({ name: "list_files", exposicao: "indice", efeito: "leitura" }),
+      expect.objectContaining({ name: "list_tags", exposicao: "indice", efeito: "leitura" }),
+      expect.objectContaining({ name: "recent_notes", exposicao: "indice", efeito: "leitura" }),
       expect.objectContaining({ name: "read_table", exposicao: "fixa", efeito: "leitura" }),
     ]));
   });

@@ -53,14 +53,14 @@ describe("universal search, find and legacy aliases", () => {
     expect(caminhos.some((c) => c.endsWith("src/x.ts"))).toBe(true);
   });
 
-  it("search_notes gives the same result as the engine for the legacy parameters on the fake vault", async () => {
+  it("search gives the same result as the engine for the legacy parameters on the fake vault", async () => {
     const app = fakeVault([
       { path: "Fluxos/Fluxo A.md", content: "# A\n## Passos\nacesso ao jira\n" },
     ]);
     const engine = new VaultSearchEngine(app);
     const tools = createSearchTools(app, engine);
 
-    const res = await executar(tools, "search_notes", { termos: ["acesso"] });
+    const res = await executar(tools, "search", { termos: ["acesso"], detalhe: true });
     const json = JSON.parse(textoDe(res));
 
     const direto: SearchQueryParams = {
@@ -68,6 +68,7 @@ describe("universal search, find and legacy aliases", () => {
       recursivo: false,
       termos: ["acesso"],
       secao: true,
+      detalhe: true,
       limite: 10,
     };
     // Same compaction that jsonResult applies to the engine payload.
@@ -93,44 +94,27 @@ describe("universal search, find and legacy aliases", () => {
     expect(json.resultados[0].caminho).toBe("Notas/Acesso.md");
   });
 
-  it("search_notes reports engine errors with its own name, as the legacy alias did", async () => {
+  it("search reports engine errors with its own name", async () => {
     const app = fakeVault([]);
     const engine = new VaultSearchEngine(app);
     vi.spyOn(engine, "search").mockRejectedValue(new Error("boom"));
     const tools = createSearchTools(app, engine);
 
-    const res = await executar(tools, "search_notes", { termos: ["acesso"] });
+    const res = await executar(tools, "search", { termos: ["acesso"] });
 
     expect(res.isError).toBe(true);
-    expect(textoDe(res)).toBe("Erro na execução do search_notes: Error: boom");
+    expect(textoDe(res)).toBe("Erro na execução do search: Error: boom");
   });
 
-  it("find_notes reports engine errors with its own name, as the legacy alias did", async () => {
+  it("find reports engine errors with its own name", async () => {
     const app = fakeVault([]);
     const engine = new VaultSearchEngine(app);
     vi.spyOn(engine, "findNotes").mockRejectedValue(new Error("boom"));
     const tools = createSearchTools(app, engine);
 
-    const res = await executar(tools, "find_notes", { query: "x" });
+    const res = await executar(tools, "find", { query: "x" });
 
     expect(res.isError).toBe(true);
-    expect(textoDe(res)).toBe("Erro na execução do find_notes: Error: boom");
-  });
-
-  it("search_notes with an absolute folder goes to the note engine, never to the universal search", async () => {
-    const app = fakeVault([]);
-    const engine = new VaultSearchEngine(app);
-    // The universal search would find 'alvo' in src/x.ts (total 1); the engine answer here is total 0.
-    const spy = vi
-      .spyOn(engine, "search")
-      .mockResolvedValue({ total: 0, resultados: [] } as unknown as Awaited<ReturnType<VaultSearchEngine["search"]>>);
-    const tools = createSearchTools(app, engine);
-
-    const res = await executar(tools, "search_notes", { pasta: dir, extensoes: ["ts"], termos: ["alvo"] });
-    const json = JSON.parse(textoDe(res));
-
-    expect(spy).toHaveBeenCalledTimes(1);
-    expect(spy.mock.calls[0][0].pasta).toBe(dir);
-    expect(json.total).toBe(0);
+    expect(textoDe(res)).toBe("Erro na execução do find: Error: boom");
   });
 });

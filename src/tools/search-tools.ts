@@ -12,7 +12,7 @@ import type { SearchQueryParams, SearchResultPayload } from "../search/types";
 import { findUniversal } from "../search/universal-find";
 import { getSectionUniversal } from "../search/universal-read";
 import { searchUniversal, type UniversalContext } from "../search/universal-search";
-import { errorResult, jsonResult, ripgrepResult } from "./format";
+import { enxugar, errorResult, jsonResult, ripgrepResult } from "./format";
 
 // Lowercase extension of the last path segment; empty when there is none.
 function extensaoDo(caminho: string): string {
@@ -35,28 +35,30 @@ export function createSearchTools(
     conteudo: { cache, pdfLoader: opts?.pdfLoader ?? loadPdfJs },
   });
 
-  // Shared handler of `search` (universal) and of the legacy alias `search_notes` (note engine only).
-  const buscarHandler = (nome: "search" | "search_notes") => async (args: Record<string, unknown>): Promise<HubToolResult> => {
+  const buscarHandler = async (args: Record<string, unknown>): Promise<HubToolResult> => {
     try {
-      // The legacy alias never routes to the universal path, so it does not read the extensions.
-      const exts = nome === "search" ? parseExtensions(args.extensoes as string[] | undefined, args.extensao as string | undefined) : [];
+      const exts = parseExtensions(args.extensoes as string[] | undefined, args.extensao as string | undefined);
       const pasta = args.pasta as string | undefined;
+      const detalhe = args.detalhe === true;
 
       let result: SearchResultPayload;
-      if (nome === "search" && isUniversalRequest(pasta, exts)) {
+      // Só a busca universal agrupa os trechos por arquivo.
+      let agrupar = false;
+      if (isUniversalRequest(pasta, exts)) {
+        agrupar = true;
         result = await searchUniversal(
           {
             termos: (args.termos as string[]) ?? [],
             extensoes: exts,
             pasta,
             recursivo: args.recursivo !== false,
-            limite: (args.limite as number) || 15,
+            limite: (args.limite as number) || 10,
           },
           contexto(),
         );
       } else {
         const queryParams: SearchQueryParams = {
-          acao: (args.acao as SearchQueryParams["acao"]) || "buscar",
+          acao: "buscar",
           pasta,
           extensao: args.extensao as string | undefined,
           recursivo: args.recursivo === true,
@@ -67,12 +69,18 @@ export function createSearchTools(
           tag: args.tag as string | undefined,
           filhas: args.filhas as string | undefined,
           arvore: args.arvore as string | undefined,
+          profundidade: args.profundidade as number | undefined,
           backlinks: args.backlinks as string | undefined,
-          prop: args.prop as string | undefined,
+          prop: args.prop as string | string[] | undefined,
           nota: args.nota as string | undefined,
           titulo: args.titulo as string | undefined,
           secao: args.secao !== false,
+          detalhe: args.detalhe === true,
           limite: (args.limite as number) || 10,
+          offset: args.offset as number | undefined,
+          sinonimos: args.sinonimos === true,
+          exato: args.exato === true,
+          ler: args.ler === true,
         };
         result = await engine.search(queryParams);
       }
@@ -80,28 +88,28 @@ export function createSearchTools(
       if (args.compacto === true) {
         return ripgrepResult(result);
       }
-      return jsonResult(result);
+      return jsonResult(enxugar(result, detalhe, agrupar));
     } catch (err) {
-      return errorResult(`Erro na execução do ${nome}`, err);
+      return errorResult("Erro na execução do search", err);
     }
   };
 
-  // Shared handler of `find` (universal) and of the legacy alias `find_notes` (note engine only).
-  const acharHandler = (nome: "find" | "find_notes") => async (args: Record<string, unknown>): Promise<HubToolResult> => {
+  const acharHandler = async (args: Record<string, unknown>): Promise<HubToolResult> => {
     try {
       const query = (args.query as string) || (args.padrao as string) || "";
-      // The legacy alias never routes to the universal path, so it does not read the extensions.
-      const exts = nome === "find" ? parseExtensions(args.extensoes as string[] | undefined) : [];
+      const exts = parseExtensions(args.extensoes as string[] | undefined);
       const pasta = args.pasta as string | undefined;
+      const detalhe = args.detalhe === true;
 
       let result: SearchResultPayload;
-      if (nome === "find" && isUniversalRequest(pasta, exts)) {
+      if (isUniversalRequest(pasta, exts)) {
         result = await findUniversal(
           {
             query,
             extensoes: exts,
             pasta,
-            limite: (args.limite as number) || 20,
+            limite: (args.limite as number) || 10,
+            offset: args.offset as number | undefined,
           },
           contexto(),
         );
@@ -111,20 +119,21 @@ export function createSearchTools(
           pasta,
           tag: args.tag as string | undefined,
           limite: (args.limite as number) || 10,
+          offset: args.offset as number | undefined,
         });
       }
 
       if (args.compacto === true) {
         return ripgrepResult(result);
       }
-      return jsonResult(result);
+      return jsonResult(enxugar(result, detalhe));
     } catch (err) {
-      return errorResult(`Erro na execução do ${nome}`, err);
+      return errorResult("Erro na execução do find", err);
     }
   };
 
-  // Input properties of search_notes (legacy). `search` adds the universal ones below.
-  const propsBuscaLegadas = {
+  // Input properties of search for vault notes; the universal ones are added below.
+  const propsBusca = {
     termos: {
       type: "array",
       items: { type: "string" },
@@ -132,7 +141,7 @@ export function createSearchTools(
     },
     titulo: {
       type: "string",
-      description: "Filtro por título/nome da nota (para buscar apenas por nome, prefira find_notes)",
+      description: "Filtro por título/nome da nota (para buscar apenas por nome, prefira find)",
     },
     tag: {
       type: "string",
@@ -144,15 +153,21 @@ export function createSearchTools(
     },
     arvore: {
       type: "string",
-      description: "Nome da nota raiz para listar descendentes (MOC)",
+      description: "Nome da nota raiz: lista as notas descendentes pelo campo up: (filhas, netas...), até `profundidade` níveis",
+    },
+    profundidade: {
+      type: "integer",
+      default: 10,
+      description: "Níveis de descendentes a seguir em arvore (padrão 10)",
     },
     backlinks: {
       type: "string",
       description: "Lista notas que linkam para esta nota",
     },
     prop: {
-      type: "string",
-      description: "Filtro frontmatter (ex.: 'epico=PROJ-4')",
+      type: ["string", "array"],
+      items: { type: "string" },
+      description: "Filtro de frontmatter 'chave=valor' (ex.: 'epico=PROJ-4'); em lista, todas as condições devem valer",
     },
     nota: {
       type: "string",
@@ -172,6 +187,31 @@ export function createSearchTools(
       type: "integer",
       default: 10,
       description: "Máximo de resultados a retornar",
+    },
+    sinonimos: {
+      type: "boolean",
+      default: false,
+      description: "Expande os termos por sinônimos (ex.: fluxo = automação = workflow). Padrão: desligado",
+    },
+    exato: {
+      type: "boolean",
+      default: false,
+      description: "Casa só palavras inteiras e ignora sinônimos",
+    },
+    detalhe: {
+      type: "boolean",
+      default: false,
+      description: "Resposta longa: trecho de 200 caracteres, trecho da seção, tags, up, pontos e datas. Padrão: só caminho, linha, trecho curto e seção",
+    },
+    ler: {
+      type: "boolean",
+      default: false,
+      description: "Devolve também o texto da seção em que o termo casou, no primeiro resultado (poupa um get_section)",
+    },
+    offset: {
+      type: "integer",
+      default: 0,
+      description: "Quantos resultados pular (paginação); a resposta traz restantes quando há mais",
     },
   };
 
@@ -196,8 +236,8 @@ export function createSearchTools(
     },
   };
 
-  // Input properties of find_notes (legacy). `find` adds `extensoes` below.
-  const propsAcharLegadas = {
+  // Input properties of find for vault notes; `find` adds `extensoes` below.
+  const propsAchar = {
     query: {
       type: "string",
       description: "Termo ou padrão a buscar no título ou caminho da nota (ex.: 'Plano de implementação', 'PROJ')",
@@ -220,6 +260,16 @@ export function createSearchTools(
       default: false,
       description: "Retorna linhas compactas estilo ripgrep (caminho:linha:trecho) para economia de tokens",
     },
+    detalhe: {
+      type: "boolean",
+      default: false,
+      description: "Resposta longa: inclui tags, up, pontos e datas. Padrão: só caminho, tipo e tamanho",
+    },
+    offset: {
+      type: "integer",
+      default: 0,
+      description: "Quantos resultados pular (paginação); a resposta traz restantes quando há mais",
+    },
   };
 
   const searchTool: HubTool = {
@@ -239,13 +289,13 @@ export function createSearchTools(
     aprovacao: "dispensada",
     inputSchema: {
       type: "object",
-      properties: { ...propsBuscaLegadas, ...propsBuscaUniversais },
+      properties: { ...propsBusca, ...propsBuscaUniversais },
     },
     annotations: {
       readOnlyHint: true,
       idempotentHint: true,
     },
-    handler: buscarHandler("search"),
+    handler: buscarHandler,
   };
 
   const findTool: HubTool = {
@@ -265,7 +315,7 @@ export function createSearchTools(
     inputSchema: {
       type: "object",
       properties: {
-        ...propsAcharLegadas,
+        ...propsAchar,
         pasta: {
           type: "string",
           description: "Pasta base opcional: caminho absoluto do computador ou relativo ao cofre",
@@ -282,50 +332,7 @@ export function createSearchTools(
       readOnlyHint: true,
       idempotentHint: true,
     },
-    handler: acharHandler("find"),
-  };
-
-  const searchNotesTool: HubTool = {
-    name: "search_notes",
-    title: "Search Vault Notes & Content",
-    description: "Legacy alias of search, limited to vault notes. Prefer search; it is also the vault's PRIMARY search tool, to use instead of Grep, Glob or Bash.",
-    categoria: "vault",
-    tags: ["vault", "busca", "notas", "grafo", "bm25"],
-    resumo: "Busca híbrida de notas no cofre por termos, tags, links ou frontmatter",
-    efeito: "leitura",
-    exposicao: "indice",
-    aprovacao: "dispensada",
-    inputSchema: {
-      type: "object",
-      properties: propsBuscaLegadas,
-    },
-    annotations: {
-      readOnlyHint: true,
-      idempotentHint: true,
-    },
-    handler: buscarHandler("search_notes"),
-  };
-
-  const findNotesTool: HubTool = {
-    name: "find_notes",
-    title: "Quick Find Notes by Title",
-    description: "Legacy alias of find, limited to vault notes. Prefer find; it is also the vault's PRIMARY name finder, to use instead of Glob or Bash.",
-    categoria: "vault",
-    tags: ["vault", "busca", "rapida", "titulo", "switcher"],
-    resumo: "Busca rápida de notas por título ou caminho no cofre",
-    efeito: "leitura",
-    exposicao: "indice",
-    aprovacao: "dispensada",
-    inputSchema: {
-      type: "object",
-      properties: propsAcharLegadas,
-      required: ["query"],
-    },
-    annotations: {
-      readOnlyHint: true,
-      idempotentHint: true,
-    },
-    handler: acharHandler("find_notes"),
+    handler: acharHandler,
   };
 
   const listFoldersTool: HubTool = {
@@ -433,6 +440,96 @@ export function createSearchTools(
     },
   };
 
+  const listTagsTool: HubTool = {
+    name: "list_tags",
+    title: "List Vault Tags",
+    description: "Lists the tags used in the vault with how many notes use each, optionally filtered by prefix.",
+    categoria: "vault",
+    tags: ["vault", "tags"],
+    resumo: "Lista as tags do cofre com a contagem de notas",
+    efeito: "leitura",
+    exposicao: "indice",
+    aprovacao: "dispensada",
+    inputSchema: {
+      type: "object",
+      properties: {
+        prefixo: {
+          type: "string",
+          description: "Só tags que começam com este prefixo (ex.: 'jira' traz jira, jira/instance)",
+        },
+        limite: {
+          type: "integer",
+          default: 50,
+          description: "Máximo de tags a retornar (0 = todas)",
+        },
+      },
+    },
+    annotations: {
+      readOnlyHint: true,
+      idempotentHint: true,
+    },
+    handler: async (args: Record<string, unknown>): Promise<HubToolResult> => {
+      try {
+        const result = engine.listarTags({
+          prefixo: args.prefixo as string | undefined,
+          limite: (args.limite as number) || 50,
+        });
+        return jsonResult(result);
+      } catch (err) {
+        return errorResult("Erro na execução do list_tags", err);
+      }
+    },
+  };
+
+  const recentNotesTool: HubTool = {
+    name: "recent_notes",
+    title: "Recently Modified Notes",
+    description: "Lists the most recently modified notes, optionally limited to a folder or a tag.",
+    categoria: "vault",
+    tags: ["vault", "recentes"],
+    resumo: "Lista as notas modificadas mais recentemente",
+    efeito: "leitura",
+    exposicao: "indice",
+    aprovacao: "dispensada",
+    inputSchema: {
+      type: "object",
+      properties: {
+        limite: {
+          type: "integer",
+          default: 10,
+          description: "Máximo de notas a retornar",
+        },
+        pasta: {
+          type: "string",
+          description: "Só notas desta pasta do cofre (inclui subpastas)",
+        },
+        tag: {
+          type: "string",
+          description: "Só notas com esta tag (inclui tags filhas, ex.: 'jira' traz 'jira/instance')",
+        },
+      },
+    },
+    annotations: {
+      readOnlyHint: true,
+      idempotentHint: true,
+    },
+    handler: async (args: Record<string, unknown>): Promise<HubToolResult> => {
+      try {
+        const r = engine.notasRecentes({
+          limite: (args.limite as number) || 10,
+          pasta: args.pasta as string | undefined,
+          tag: args.tag as string | undefined,
+        });
+        return jsonResult({
+          total: r.total,
+          resultados: r.resultados.map((x) => ({ caminho: x.caminho, modificada: x.modificada })),
+        });
+      } catch (err) {
+        return errorResult("Erro na execução do recent_notes", err);
+      }
+    },
+  };
+
   const getSectionTool: HubTool = {
     name: "get_section",
     title: "Get Note Section or Headings",
@@ -482,6 +579,22 @@ export function createSearchTools(
           type: "integer",
           description: "Página final (inclusiva)",
         },
+        pedidos: {
+          type: "array",
+          maxItems: 10,
+          description: "Vários pedidos numa chamada (máx. 10); cada item aceita arquivo, secao, linha_inicio, linha_fim, pagina_inicio e pagina_fim",
+          items: {
+            type: "object",
+            properties: {
+              arquivo: { type: "string" },
+              secao: { type: "string" },
+              linha_inicio: { type: "integer" },
+              linha_fim: { type: "integer" },
+              pagina_inicio: { type: "integer" },
+              pagina_fim: { type: "integer" },
+            },
+          },
+        },
       },
     },
     annotations: {
@@ -489,40 +602,134 @@ export function createSearchTools(
       idempotentHint: true,
     },
     handler: async (args: Record<string, unknown>): Promise<HubToolResult> => {
-      try {
-        const arquivo = (args.arquivo ?? undefined) as string | undefined;
-        const alvo = (arquivo ?? args.nota) as string | undefined;
+      // Lê um pedido com a leitura de sempre; undefined quando não há arquivo nem nota.
+      const lerUm = async (a: Record<string, unknown>): Promise<SearchResultPayload | undefined> => {
+        const arquivo = (a.arquivo ?? undefined) as string | undefined;
+        const alvo = (arquivo ?? a.nota) as string | undefined;
         if (!alvo) {
-          return errorResult("Erro na execução do get_section", "informe 'arquivo'");
+          return undefined;
         }
         // The universal reader handles absolute paths (from `arquivo` or `nota`) and `arquivo` with a non-Markdown extension.
         // A relative `nota` stays on the note engine, so "Plano v1.2" is never treated as extension "2".
         const ext = extensaoDo(alvo);
         if (isAbsolutePath(alvo) || (arquivo !== undefined && ext !== "" && ext !== "md")) {
-          const result = await getSectionUniversal(
+          return getSectionUniversal(
             {
               arquivo: alvo,
-              secao: (args.secao ?? args.cabecalho) as string | undefined,
-              linha_inicio: args.linha_inicio as number | undefined,
-              linha_fim: args.linha_fim as number | undefined,
-              pagina_inicio: args.pagina_inicio as number | undefined,
-              pagina_fim: args.pagina_fim as number | undefined,
+              secao: (a.secao ?? a.cabecalho) as string | undefined,
+              linha_inicio: a.linha_inicio as number | undefined,
+              linha_fim: a.linha_fim as number | undefined,
+              pagina_inicio: a.pagina_inicio as number | undefined,
+              pagina_fim: a.pagina_fim as number | undefined,
             },
             contexto(),
           );
-          return jsonResult(result);
         }
         const queryParams: SearchQueryParams = {
           acao: "obter_secao",
           nota: alvo,
-          cabecalho: (args.cabecalho ?? args.secao) as string | undefined,
-          linha_inicio: args.linha_inicio as number | undefined,
-          linha_fim: args.linha_fim as number | undefined,
+          cabecalho: (a.cabecalho ?? a.secao) as string | undefined,
+          linha_inicio: a.linha_inicio as number | undefined,
+          linha_fim: a.linha_fim as number | undefined,
         };
-        const result = await engine.search(queryParams);
-        return jsonResult(result);
+        return engine.search(queryParams);
+      };
+
+      try {
+        if (Array.isArray(args.pedidos)) {
+          // Vários pedidos numa chamada: lidos em sequência, no máximo 10.
+          const pedidos = args.pedidos as Record<string, unknown>[];
+          const resultados: SearchResultPayload["resultados"] = [];
+          const dicas: string[] = [];
+          for (const [i, pedido] of pedidos.slice(0, 10).entries()) {
+            const n = i + 1;
+            const unico = await lerUm(pedido);
+            if (unico === undefined) {
+              dicas.push(`Pedido ${n}: informe 'arquivo'`);
+              continue;
+            }
+            resultados.push(...unico.resultados);
+            dicas.push(...(unico.dicas ?? []).map((d) => `Pedido ${n}: ${d}`));
+          }
+          if (pedidos.length > 10) {
+            dicas.push("Só os 10 primeiros pedidos foram lidos");
+          }
+          return jsonResult({ total: resultados.length, resultados, dicas });
+        }
+
+        const unico = await lerUm(args);
+        if (unico === undefined) {
+          return errorResult("Erro na execução do get_section", "informe 'arquivo'");
+        }
+        return jsonResult(unico);
       } catch (err) {
         return errorResult("Erro na execução do get_section", err);
+      }
+    },
+  };
+
+  const getNoteTool: HubTool = {
+    name: "get_note",
+    title: "Get Note Structure",
+    description:
+      "Reads one vault note in a single call: selected frontmatter, heading outline, outgoing links and, optionally, the first N characters of the body. " +
+      "Prefer it over get_section when you need structure or metadata, not a specific section.",
+    categoria: "vault",
+    tags: ["vault", "nota", "frontmatter", "outline", "links"],
+    resumo: "Lê uma nota: frontmatter, esboço dos cabeçalhos, links de saída e início do corpo",
+    efeito: "leitura",
+    exposicao: "indice",
+    aprovacao: "dispensada",
+    inputSchema: {
+      type: "object",
+      properties: {
+        nota: {
+          type: "string",
+          description: "Nome ou caminho da nota",
+        },
+        frontmatter: {
+          type: "array",
+          items: { type: "string" },
+          description: "Chaves do frontmatter a devolver; ['*'] ou omitido = todas; [] = nenhuma",
+        },
+        outline: {
+          type: "boolean",
+          default: true,
+          description: "Esboço dos cabeçalhos",
+        },
+        outlinks: {
+          type: "boolean",
+          default: true,
+          description: "Links de saída",
+        },
+        corpo: {
+          type: "integer",
+          default: 0,
+          description: "Se > 0, devolve os primeiros N caracteres do corpo",
+        },
+      },
+      required: ["nota"],
+    },
+    annotations: {
+      readOnlyHint: true,
+      idempotentHint: true,
+    },
+    handler: async (args: Record<string, unknown>): Promise<HubToolResult> => {
+      try {
+        const nota = args.nota as string | undefined;
+        if (!nota) {
+          return errorResult("Erro na execução do get_note", "informe 'nota'");
+        }
+        const result = await engine.lerNota({
+          nota,
+          frontmatter: args.frontmatter as string[] | undefined,
+          outline: args.outline as boolean | undefined,
+          outlinks: args.outlinks as boolean | undefined,
+          corpo: args.corpo as number | undefined,
+        });
+        return jsonResult(enxugar(result, false));
+      } catch (err) {
+        return errorResult("Erro na execução do get_note", err);
       }
     },
   };
@@ -599,11 +806,12 @@ export function createSearchTools(
   return [
     searchTool,
     findTool,
-    searchNotesTool,
-    findNotesTool,
     listFoldersTool,
     listFilesTool,
+    listTagsTool,
+    recentNotesTool,
     getSectionTool,
+    getNoteTool,
     readTableTool,
   ];
 }

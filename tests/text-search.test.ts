@@ -49,4 +49,20 @@ describe("searchText", () => {
     const r = searchText(longa, ["x"], { extensao: "txt", max: 1 });
     expect(r[0].trecho).toHaveLength(200);
   });
+
+  it("aceita o texto como string ou como lista de linhas, com resultado igual", () => {
+    const texto = "primeira\nalvo aqui\nterceira\nalvo de novo";
+    const comString = searchText(texto, ["alvo"], { extensao: "txt", max: 5 });
+    const comLinhas = searchText(texto.split("\n"), ["alvo"], { extensao: "txt", max: 5 });
+    expect(comString).toHaveLength(2);
+    expect(comLinhas).toEqual(comString);
+  });
+
+  it("aceita lista de linhas em codigo e mantem o simbolo envolvente", () => {
+    const ts = "function soma(a: number, b: number) {\n  return retorno;\n}\n";
+    const comString = searchText(ts, ["retorno"], { extensao: "ts", max: 5 });
+    const comLinhas = searchText(ts.split("\n"), ["retorno"], { extensao: "ts", max: 5 });
+    expect(comString[0].simbolo_envolvente).toBe("soma");
+    expect(comLinhas).toEqual(comString);
+  });
 });

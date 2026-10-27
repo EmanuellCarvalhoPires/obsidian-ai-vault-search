@@ -33,6 +33,26 @@ export const LIMITE_BINARIO_BYTES = 50 * 1024 * 1024;
 
 const BINARIAS = new Set(["xlsx", "docx", "pdf"]);
 
+// True when the file is larger than what the reader accepts for its extension.
+export function excedeLimiteDeTamanho(extensao: string, tamanho: number): boolean {
+  const ext = extensao.trim().toLowerCase();
+  return tamanho > (BINARIAS.has(ext) ? LIMITE_BINARIO_BYTES : LIMITE_TEXTO_BYTES);
+}
+
+// Rough memory estimate of a loaded content, used by the cache byte limit.
+export function estimarBytes(c: Conteudo): number {
+  let caracteres = 0;
+  for (const linha of c.linhas ?? []) caracteres += linha.length + 1;
+  for (const aba of c.abas ?? []) {
+    for (const linha of aba.linhas) {
+      for (const celula of linha) caracteres += celula.length;
+    }
+  }
+  for (const paragrafo of c.paragrafos ?? []) caracteres += paragrafo.texto.length;
+  for (const pagina of c.paginas ?? []) caracteres += pagina.length;
+  return 64 + 2 * caracteres;
+}
+
 // Reads and interprets one file. Returns undefined for unsupported types, oversized files and any read error.
 export async function carregarConteudo(
   arq: ArquivoRef,
@@ -45,13 +65,12 @@ export async function carregarConteudo(
   const tipo = tipoDoArquivo(ext);
   if (tipo === "outro") return undefined;
 
-  const limite = BINARIAS.has(ext) ? LIMITE_BINARIO_BYTES : LIMITE_TEXTO_BYTES;
-  if (arq.tamanho > limite) return undefined;
+  if (excedeLimiteDeTamanho(ext, arq.tamanho)) return undefined;
 
   try {
     const conteudo = await lerConteudo(arq.abs, ext, tipo, deps);
     if (conteudo !== undefined) {
-      deps.cache.set(arq.abs, arq.mtime, arq.tamanho, conteudo);
+      deps.cache.set(arq.abs, arq.mtime, arq.tamanho, conteudo, estimarBytes(conteudo));
     }
     return conteudo;
   } catch {

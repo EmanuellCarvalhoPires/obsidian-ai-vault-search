@@ -50,9 +50,9 @@ describe("compact output", () => {
 });
 
 describe("tool responses", () => {
-  it("search_notes: no indentation, no structuredContent, no empty fields", async () => {
+  it("search: no indentation, no structuredContent, no empty fields", async () => {
     const { call } = setup();
-    const { res, text, json } = await call("search_notes", { termos: ["acesso"] });
+    const { res, text, json } = await call("search", {termos: ["acesso"], detalhe: true });
     expect(res.structuredContent).toBeUndefined();
     expect(text).not.toContain("\n");
     expect(text).not.toContain('""');
@@ -63,7 +63,7 @@ describe("tool responses", () => {
 
   it("unranked results carry no constant pontos", async () => {
     const { call } = setup();
-    const { json } = await call("search_notes", { filhas: "MOC - Tools" });
+    const { json } = await call("search", {filhas: "MOC - Tools", detalhe: true });
     expect(json.resultados.map((r: any) => r.nome)).toEqual(["Cat"]);
     expect(json.resultados[0].pontos).toBeUndefined();
   });
@@ -83,14 +83,14 @@ describe("tool responses", () => {
 
   it("empty result keeps total and resultados", async () => {
     const { call } = setup();
-    const { json } = await call("search_notes", { termos: ["inexistente"] });
+    const { json } = await call("search", {termos: ["inexistente"] });
     expect(json.total).toBe(0);
     expect(json.resultados).toEqual([]);
   });
 
-  it("search_notes with compacto: true returns ripgrep formatted plain text (caminho:linha:trecho)", async () => {
+  it("search with compacto: true returns ripgrep formatted plain text (caminho:linha:trecho)", async () => {
     const { call } = setup();
-    const { res, text } = await call("search_notes", { termos: ["acesso"], compacto: true });
+    const { res, text } = await call("search", { termos: ["acesso"], compacto: true });
     expect(res.structuredContent).toBeUndefined();
     // Plain text format caminho:linha:trecho, not JSON
     expect(text.startsWith("{")).toBe(false);
@@ -109,9 +109,9 @@ describe("tool responses", () => {
     // Verify no [L6] or [L7] prefixes inserted
     expect(sec.json.resultados[0].conteudo).not.toContain("[L");
   });
-  it("find_notes: matches notes by title rapidly without reading content", async () => {
+  it("find: matches notes by title rapidly without reading content", async () => {
     const { call } = setup();
-    const { json, text } = await call("find_notes", { query: "Fluxo" });
+    const { json, text } = await call("find", {query: "Fluxo", detalhe: true });
     expect(text).not.toContain("\n");
     expect(json.total).toBe(2);
     expect(json.resultados[0].nome).toBe("Fluxo A");
@@ -119,11 +119,11 @@ describe("tool responses", () => {
     expect(json.resultados[0].pontos).toBeGreaterThan(0);
   });
 
-  it("find_notes with compacto: true returns ripgrep formatted plain text", async () => {
+  it("find with compacto: true returns ripgrep formatted plain text", async () => {
     const { call } = setup();
-    const { res, text } = await call("find_notes", { query: "Tools", compacto: true });
+    const { res, text } = await call("find", { query: "Tools", compacto: true });
     expect(res.structuredContent).toBeUndefined();
     expect(text.startsWith("{")).toBe(false);
-    expect(text).toContain("MOC - Tools.md:");
+    expect(text).toContain("MOC - Tools.md");
   });
 });

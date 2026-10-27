@@ -94,7 +94,7 @@ export function listSymbols(conteudo: string, ext: string): Simbolo[] {
 }
 
 // Name of the closest symbol declared at or above `indice` (0-based).
-export function findEnclosingSymbol(linhas: string[], indice: number, ext: string): string | undefined {
+export function findEnclosingSymbol(linhas: readonly string[], indice: number, ext: string): string | undefined {
   if (familia(ext) === undefined) return undefined;
   for (let i = Math.min(indice, linhas.length - 1); i >= 0; i--) {
     const achado = detectar(linhas[i], ext);

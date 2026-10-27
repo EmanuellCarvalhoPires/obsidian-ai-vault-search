@@ -3,6 +3,7 @@ import { stat } from "node:fs/promises";
 import * as path from "node:path";
 import { isExcluded } from "./exclusion";
 import { carregarConteudo } from "./file-content";
+import { ehCaminhoBloqueado, redigirSegredos } from "./protecao";
 import { displayPath, isAbsolutePath } from "./path-resolver";
 import { columnIndex, columnLetter } from "./tabular-parser";
 import type { Aba } from "./xlsx-reader";
@@ -98,6 +99,20 @@ function montarTabela(
   return [cabecalho, separador, ...corpo].join("\n");
 }
 
+// Redacts secrets in the table values, whatever the output format.
+function redigirTabela(
+  tabela: string | Record<string, string | number>[],
+): string | Record<string, string | number>[] {
+  if (typeof tabela === "string") return redigirSegredos(tabela);
+  return tabela.map((registro) => {
+    const seguro: Record<string, string | number> = {};
+    for (const [chave, valor] of Object.entries(registro)) {
+      seguro[chave] = typeof valor === "string" ? redigirSegredos(valor) : valor;
+    }
+    return seguro;
+  });
+}
+
 // Reads a page of a spreadsheet or CSV/TSV file. Relative paths are resolved from the vault base path.
 export async function readTable(p: LerTabelaParams, ctx: UniversalContext): Promise<Record<string, unknown>> {
   const erro = (dica: string): Record<string, unknown> => ({ total_linhas: 0, dicas: [dica] });
@@ -111,6 +126,9 @@ export async function readTable(p: LerTabelaParams, ctx: UniversalContext): Prom
   // Vault files are compared by their vault-relative path; computer paths are never excluded.
   const caminho = ctx.basePath === "" ? abs.replace(/\\/g, "/") : displayPath(abs, ctx.basePath);
   if (isExcluded(caminho, ctx.excluidas)) return naoEncontrado;
+  if (ehCaminhoBloqueado(abs) || ehCaminhoBloqueado(caminho)) {
+    return erro("Acesso bloqueado: arquivo de credenciais ou de configuração sensível");
+  }
 
   const info = await stat(abs).catch(() => undefined);
   if (info === undefined || !info.isFile()) return naoEncontrado;
@@ -167,7 +185,7 @@ export async function readTable(p: LerTabelaParams, ctx: UniversalContext): Prom
   });
 
   const formato = p.formato ?? "markdown";
-  const tabela = montarTabela(formato, nomes, indices, linhas, inicio, fim);
+  const tabela = redigirTabela(montarTabela(formato, nomes, indices, linhas, inicio, fim));
 
   const resultado: Record<string, unknown> = {
     arquivo: caminho,

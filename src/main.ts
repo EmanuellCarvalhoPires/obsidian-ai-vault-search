@@ -2,7 +2,7 @@
 import { Plugin } from "obsidian";
 import { EcosystemConnector } from "./ecosystem/connector";
 import { AI_ECOSYSTEM_API_VERSION, HOOKS_SERVICE } from "./ecosystem/types";
-import type { AIEcosystemAPI, HooksService, HubModuleRegistration, ToolIndexEntry } from "./ecosystem/types";
+import type { AIEcosystemAPI, HooksService, HubModuleRegistration, HubTool, ToolIndexEntry } from "./ecosystem/types";
 import { DEFAULT_SETTINGS, loadSettings } from "./settings";
 import type { VaultSearchSettings } from "./settings";
 import { VaultSearchEngine } from "./search/search-engine";
@@ -17,6 +17,7 @@ export default class AIVaultSearchPlugin extends Plugin {
   private config: VaultSearchSettings = DEFAULT_SETTINGS;
   private api: AIEcosystemAPI | undefined;
   private unregisterSetupHandler: (() => void) | undefined;
+  private tools: HubTool[] = [];
 
   async onload(): Promise<void> {
     console.log("[AI Vault Search] Carregando plugin...");
@@ -24,6 +25,17 @@ export default class AIVaultSearchPlugin extends Plugin {
     this.config = loadSettings(await this.loadData());
     this.engine = new VaultSearchEngine(this.app);
     this.engine.setExcludedFolders(this.config.pastasForaDoIndice);
+    this.tools = createSearchTools(this.app, this.engine);
+
+    // Mantém o índice da busca em dia; a sincronização por mtime é a garantia, os eventos só adiantam o trabalho.
+    this.registerEvent(this.app.metadataCache.on("changed", (file) => this.engine?.invalidarNota(file.path)));
+    this.registerEvent(this.app.vault.on("delete", (file) => this.engine?.removerNota(file.path)));
+    this.registerEvent(this.app.vault.on("rename", (file, antigo) => this.engine?.renomearNota(antigo, file.path)));
+    this.app.workspace.onLayoutReady(() => {
+      window.setTimeout(() => {
+        this.engine?.aquecerIndice().catch((err: unknown) => console.error("[AI Vault Search] Falha ao aquecer o índice", err));
+      }, 3000);
+    });
 
     // Conecta ao barramento do AI Ecosystem
     this.connector = new EcosystemConnector(this, {
@@ -32,7 +44,7 @@ export default class AIVaultSearchPlugin extends Plugin {
         name: this.manifest.name,
         version: this.manifest.version,
         apiVersion: AI_ECOSYSTEM_API_VERSION,
-        tools: createSearchTools(this.app, this.engine!),
+        tools: this.tools,
         routes: [
           {
             method: "POST",
@@ -102,7 +114,7 @@ export default class AIVaultSearchPlugin extends Plugin {
 
   private syncToolIndex(api: AIEcosystemAPI | undefined = this.api): void {
     if (!api?.toolIndex) return;
-    const tools = createSearchTools(this.app, this.engine!);
+    const tools = this.tools;
     const entries: ToolIndexEntry[] = tools.map((t) => ({
       name: t.name,
       title: t.title,
