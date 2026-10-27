@@ -42,12 +42,12 @@ export function benchFixture(): FakeNote[] {
 }
 
 const calls: [string, Record<string, unknown>][] = [
-  ["search_notes", { termos: ["acesso", "projeto"] }],
-  ["search_notes", { tag: "automacao" }],
-  ["search_notes", { filhas: "MOC - Tools" }],
-  ["search_notes", { backlinks: "MOC - Tools" }],
-  ["search_notes", { prop: "efeito=leitura" }],
-  ["search_notes", { arvore: "MOC - Tools" }],
+  ["search", { termos: ["acesso", "projeto"] }],
+  ["search", { tag: "automacao" }],
+  ["search", { filhas: "MOC - Tools" }],
+  ["search", { backlinks: "MOC - Tools" }],
+  ["search", { prop: "efeito=leitura" }],
+  ["search", { arvore: "MOC - Tools" }],
   ["list_files", { pasta: "Knowledge/Fluxos", recursivo: true }],
   ["list_folders", { pasta: "", recursivo: true }],
   ["get_section", { nota: "Fluxo 0-0", cabecalho: "Notas" }],
@@ -66,6 +66,6 @@ it.skipIf(!process.env.BENCH)("measure", async () => {
     lines.push(`${name} ${JSON.stringify(args)} => text=${bytes} structured=${structured}`);
   }
   const schemaLen = JSON.stringify(tools.map((t) => ({ n: t.name, d: t.description, s: t.inputSchema }))).length;
-  lines.push(`SCHEMA total=${schemaLen} search_notes=${JSON.stringify(tools[0].inputSchema).length + tools[0].description.length}`);
+  lines.push(`SCHEMA total=${schemaLen} search=${JSON.stringify(tools[0].inputSchema).length + tools[0].description.length}`);
   console.log("BENCH\n" + lines.join("\n"));
 });

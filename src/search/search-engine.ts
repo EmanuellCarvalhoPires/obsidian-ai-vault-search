@@ -2,7 +2,12 @@
 import { TFile, TFolder } from "obsidian";
 import type { App, TAbstractFile } from "obsidian";
 import { isExcluded, normalizeFolders } from "./exclusion";
-import type { SearchMatch, SearchQueryParams, SearchResultPayload } from "./types";
+import type { LerNotaParams, SearchMatch, SearchQueryParams, SearchResultPayload } from "./types";
+import { IndiceBm25, tokenizar } from "./indice-bm25";
+import type { TermoConsulta } from "./indice-bm25";
+import { filtrarBaixaPontuacao, pontuarNomeDetalhado } from "./universal-find";
+import { escolherCabecalho } from "./cabecalho";
+import { maisParecidos } from "./similaridade";
 
 export const SINONIMOS: Set<string>[] = [
   new Set(["acesso", "access", "credencial", "token", "auth"]),
@@ -19,6 +24,22 @@ export const SINONIMOS: Set<string>[] = [
   new Set(["automacao", "automation", "fluxo", "workflow"]),
   new Set(["validar", "auditar", "conferir", "checar", "verificar"]),
 ];
+
+// Limite do texto de seção que a busca com ler devolve.
+const LER_MAX_CARACTERES = 4000;
+
+// Tamanho dos trechos: curto por padrão, longo só com detalhe.
+const TRECHO_PADRAO = 120;
+const TRECHO_DETALHE = 200;
+const SECAO_TRECHO_DETALHE = 300;
+
+/** Só linhas de links (wikilinks, links Markdown, pontuação e números) não servem de trecho. */
+export function linhaSoLinks(linha: string): boolean {
+  const semWikilinks = linha.replace(/\[\[[^\]]*\]\]/g, "");
+  const semLinks = semWikilinks.replace(/\[[^\]]*\]\([^)]*\)/g, "");
+  if (semLinks === linha) return false;
+  return semLinks.replace(/[\s\-*+>|,;:.\d]/g, "") === "";
+}
 
 function norm(texto: unknown): string {
   if (!texto) return "";
@@ -37,6 +58,42 @@ function getVariantes(termo: string): Set<string> {
   return new Set([t]);
 }
 
+// Trecho e seção de uma nota para a página devolvida.
+interface TrechoNota {
+  linha?: number;
+  trecho?: string;
+  secaoTitulo?: string;
+  secaoLinha?: number;
+  secaoTrecho?: string;
+}
+
+function escaparRegExp(texto: string): string {
+  return texto.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Exato: a variante precisa ser palavra inteira (limites a-z0-9), não parte de outra.
+function casaLinha(linhaNormalizada: string, termos: TermoConsulta[], exato: boolean): boolean {
+  for (const termo of termos) {
+    for (const variante of termo.variantes) {
+      if (!exato) {
+        if (linhaNormalizada.includes(variante)) return true;
+      } else if (new RegExp(`(^|[^a-z0-9])${escaparRegExp(variante)}([^a-z0-9]|$)`).test(linhaNormalizada)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+// Quantos termos distintos a linha casa (cada termo conta no máximo 1).
+function contarTermos(linhaNormalizada: string, termos: TermoConsulta[], exato: boolean): number {
+  let total = 0;
+  for (const termo of termos) {
+    if (casaLinha(linhaNormalizada, [termo], exato)) total++;
+  }
+  return total;
+}
+
 function isIgnored(path: string): boolean {
   return (
     path.startsWith(".obsidian") ||
@@ -49,6 +106,9 @@ function isIgnored(path: string): boolean {
 
 export class VaultSearchEngine {
   private excludedFolders: string[] = [];
+  private readonly indice = new IndiceBm25();
+  // Marca (mtime e tamanho) de cada nota já lida pelo índice.
+  private readonly indexado = new Map<string, { mtime: number; size: number }>();
 
   constructor(private readonly app: App) {}
 
@@ -71,14 +131,78 @@ export class VaultSearchEngine {
   }
 
   private getMarkdownFiles(): TFile[] {
-    return this.app.vault.getMarkdownFiles().filter((f) => {
-      const p = f.path;
-      return (
-        !this.ignored(p) &&
-        !p.startsWith("MCP/Tools") &&
-        !p.startsWith("MCP/Requests")
+    return this.app.vault.getMarkdownFiles().filter((f) => !this.ignored(f.path));
+  }
+
+  // Pasta relativa ao cofre, sem diferenciar maiúsculas; vazia ou "." não filtra.
+  private filtrarPorPasta(files: TFile[], pasta: string | undefined): TFile[] {
+    const alvo = (pasta ?? "").trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "").toLowerCase();
+    if (alvo === "" || alvo === ".") return files;
+    return files.filter((f) => {
+      const caminho = f.path.toLowerCase();
+      return caminho === alvo || caminho.startsWith(alvo + "/");
+    });
+  }
+
+  // Cada condição é "chave=valor" (separa no primeiro "="); sem "=" vale só a chave. Todas precisam valer.
+  private filtrarPorProp(files: TFile[], prop: string | string[]): TFile[] {
+    const condicoes = (Array.isArray(prop) ? prop : [prop])
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map((s) => {
+        const igual = s.indexOf("=");
+        if (igual < 0) return { chave: norm(s), valor: undefined as string | undefined };
+        return { chave: norm(s.slice(0, igual)), valor: norm(s.slice(igual + 1)) };
+      });
+
+    return files.filter((f) => {
+      const fm = this.app.metadataCache.getFileCache(f)?.frontmatter;
+      if (!fm) return false;
+      return condicoes.every(({ chave, valor }) =>
+        Object.entries(fm).some(([k, v]) => {
+          if (norm(k) !== chave) return false;
+          if (valor === undefined) return true;
+          // Lista no frontmatter: basta um elemento casar.
+          const valores = Array.isArray(v) ? v : [v];
+          return valores.some((x) => norm(String(x)).includes(valor));
+        }),
       );
     });
+  }
+
+  // Dicas de busca de notas sem resultado; nada quando há resultados (quem chama decide).
+  private dicasSemResultado(params: SearchQueryParams, universo: TFile[], pediuTermos: boolean): string[] {
+    const dicas: string[] = [];
+
+    if (params.tag) {
+      const tagSemHash = params.tag.replace(/^#/, "").replace(/\/$/, "");
+      const tags = Array.from(new Set(universo.flatMap((f) => this.extractTags(f))));
+      const parecidas = maisParecidos(tagSemHash, tags);
+      dicas.push(
+        `Nenhuma nota com a tag '${params.tag}'.` +
+          (parecidas.length > 0 ? ` Tags parecidas: ${parecidas.join(", ")}.` : ""),
+      );
+    }
+
+    if (params.titulo) {
+      const parecidos = maisParecidos(params.titulo, universo.map((f) => f.basename));
+      dicas.push(
+        `Nenhuma nota com '${params.titulo}' no título.` +
+          (parecidos.length > 0 ? ` Nomes parecidos: ${parecidos.join(", ")}.` : ""),
+      );
+    }
+
+    if (pediuTermos) {
+      // Exato ignora sinônimos, então a dica sugere tirar exato; sem sinônimos, sugere ligá-los.
+      const complemento = params.exato
+        ? " ou tire exato"
+        : params.sinonimos
+          ? ""
+          : ", ou use sinonimos: true";
+      dicas.push(`Nenhuma nota casou com os termos. Tente menos termos${complemento}.`);
+    }
+
+    return dicas;
   }
 
   private extractUp(file: TFile): string[] {
@@ -122,11 +246,154 @@ export class VaultSearchEngine {
     return Array.from(new Set(cache.links.map((l) => l.link.replace(/[#^].*$/, "").trim())));
   }
 
+  /** Deixa o índice igual às notas visíveis; só relê as que mudaram de mtime ou tamanho. */
+  private async sincronizarIndice(files: TFile[]): Promise<void> {
+    const visiveis = new Set(files.map((f) => f.path));
+    for (const path of [...this.indexado.keys()]) {
+      if (visiveis.has(path)) continue;
+      this.indice.remover(path);
+      this.indexado.delete(path);
+    }
+
+    for (const file of files) {
+      const marca = this.indexado.get(file.path);
+      if (marca && marca.mtime === file.stat.mtime && marca.size === file.stat.size) continue;
+
+      const corpo = await this.app.vault.cachedRead(file);
+      this.indice.atualizar(file.path, {
+        titulo: file.basename,
+        tags: this.extractTags(file).join(" "),
+        up: this.extractUp(file).join(" "),
+        corpo,
+      });
+      this.indexado.set(file.path, { mtime: file.stat.mtime, size: file.stat.size });
+    }
+  }
+
+  private montarTermosConsulta(termos: string[], opcoes: { sinonimos: boolean; exato: boolean }): TermoConsulta[] {
+    const consulta: TermoConsulta[] = [];
+    for (const termo of termos) {
+      for (const palavra of tokenizar(String(termo))) {
+        const variantes = opcoes.sinonimos && !opcoes.exato ? [...getVariantes(palavra)] : [palavra];
+        consulta.push({ variantes });
+      }
+    }
+    return consulta;
+  }
+
+  /**
+   * Linha que casa mais termos (empate: a primeira) e a seção dela quando pedida.
+   * Só roda para a página devolvida.
+   */
+  private async localizarTrecho(
+    file: TFile,
+    termos: TermoConsulta[],
+    opcoes: { exato: boolean; secao: boolean; detalhe: boolean },
+  ): Promise<TrechoNota> {
+    const linhas = (await this.app.vault.cachedRead(file)).split(/\r?\n/);
+    const tamanhoTrecho = opcoes.detalhe ? TRECHO_DETALHE : TRECHO_PADRAO;
+    const achado: TrechoNota = {};
+
+    let melhor = 0;
+    for (let i = 0; i < linhas.length; i++) {
+      // Linha só de links repete a nota e não ajuda a ler o trecho.
+      if (linhaSoLinks(linhas[i])) continue;
+      const contagem = contarTermos(norm(linhas[i]), termos, opcoes.exato);
+      if (contagem > melhor) {
+        melhor = contagem;
+        achado.linha = i + 1;
+        achado.trecho = linhas[i].trim().slice(0, tamanhoTrecho);
+      }
+    }
+
+    const cache = this.app.metadataCache.getFileCache(file);
+    if (opcoes.secao && cache?.headings) {
+      for (const h of cache.headings) {
+        if (h.position.start.line <= (achado.linha || 1)) {
+          achado.secaoTitulo = h.heading;
+          achado.secaoLinha = h.position.start.line + 1;
+          if (opcoes.detalhe) {
+            const fimLinha = Math.min(h.position.start.line + 8, linhas.length);
+            achado.secaoTrecho = linhas
+              .slice(h.position.start.line, fimLinha)
+              .join(" ")
+              .trim()
+              .slice(0, SECAO_TRECHO_DETALHE);
+          }
+        }
+      }
+    }
+
+    // A seção que só repete o nome da nota não acrescenta nada.
+    if (achado.secaoTitulo !== undefined && norm(achado.secaoTitulo) === norm(file.basename)) {
+      achado.secaoTitulo = undefined;
+      achado.secaoLinha = undefined;
+      achado.secaoTrecho = undefined;
+    }
+    return achado;
+  }
+
+  /** Texto da seção que contém a linha; sem cabeçalho antes dela, o trecho inicial da nota. */
+  private async lerSecaoDoResultado(
+    file: TFile,
+    linha: number | undefined,
+  ): Promise<{ titulo?: string; linhaInicio: number; conteudo: string }> {
+    const linhas = (await this.app.vault.cachedRead(file)).split(/\r?\n/);
+    const headings = this.app.metadataCache.getFileCache(file)?.headings ?? [];
+    const alvo = Math.max(0, (linha ?? 1) - 1);
+
+    let idx = -1;
+    for (let i = 0; i < headings.length; i++) {
+      if (headings[i].position.start.line <= alvo) idx = i;
+    }
+
+    let inicio: number;
+    let fim: number;
+    let titulo: string | undefined;
+    if (idx >= 0) {
+      const atual = headings[idx];
+      inicio = atual.position.start.line;
+      titulo = atual.heading;
+      const proximo = headings.slice(idx + 1).find((h) => h.level <= atual.level);
+      fim = proximo !== undefined ? proximo.position.start.line : linhas.length;
+    } else {
+      inicio = 0;
+      fim = headings.length > 0 ? headings[0].position.start.line : linhas.length;
+    }
+
+    const texto = linhas.slice(inicio, fim).join("\n").trim();
+    const conteudo =
+      texto.length > LER_MAX_CARACTERES
+        ? `${texto.slice(0, LER_MAX_CARACTERES)}\n[... truncado; use get_section para o restante]`
+        : texto;
+    return { titulo, linhaInicio: inicio + 1, conteudo };
+  }
+
+  /** Chamado quando o Obsidian altera a nota: a próxima busca a relê. */
+  invalidarNota(path: string): void {
+    this.indexado.delete(path);
+  }
+
+  removerNota(path: string): void {
+    this.indice.remover(path);
+    this.indexado.delete(path);
+  }
+
+  /** O novo caminho entra no índice na próxima busca. */
+  renomearNota(antigo: string, _novo: string): void {
+    this.removerNota(antigo);
+  }
+
+  async aquecerIndice(): Promise<void> {
+    await this.sincronizarIndice(this.getMarkdownFiles());
+  }
+
   async findNotes(params: {
     query?: string;
     padrao?: string;
     pasta?: string;
     limite?: number;
+    offset?: number;
     tag?: string;
     extensao?: string;
   }): Promise<SearchResultPayload> {
@@ -134,16 +401,17 @@ export class VaultSearchEngine {
     const rawQuery = (params.query || params.padrao || "").trim();
     const pasta = (params.pasta || "").trim().replace(/\/$/, "");
     const limite = params.limite && params.limite > 0 ? params.limite : 10;
+    const offset = Math.max(0, Math.floor(params.offset ?? 0));
     const ext = (params.extensao || "md").toLowerCase();
 
     let files =
       ext === "md"
         ? this.getMarkdownFiles()
         : this.app.vault.getFiles().filter((f) => !this.ignored(f.path) && (ext === "*" || f.extension.toLowerCase() === ext));
+    // Antes dos filtros de pasta e tag: as dicas de resultado vazio olham o cofre todo.
+    const universo = files;
 
-    if (pasta) {
-      files = files.filter((f) => f.path.startsWith(pasta + "/") || f.path === pasta);
-    }
+    files = this.filtrarPorPasta(files, params.pasta);
 
     if (params.tag) {
       const tagAlvo = norm(params.tag.replace(/^#/, "").replace(/\/$/, ""));
@@ -161,49 +429,24 @@ export class VaultSearchEngine {
     interface ScoredMatch {
       file: TFile;
       pontos: number;
+      casados: number;
+      tokens: number;
     }
 
     let scored: ScoredMatch[] = [];
 
     if (tokens.length === 0) {
-      scored = files.map((f) => ({ file: f, pontos: 0 }));
+      scored = files.map((f) => ({ file: f, pontos: 0, casados: 0, tokens: 0 }));
       scored.sort((a, b) => b.file.stat.mtime - a.file.stat.mtime);
     } else {
+      // Same score and low-score filter as the universal find.
       for (const file of files) {
-        const normBase = norm(file.basename);
-        const normPath = norm(file.path);
-
-        let baseMatchCount = 0;
-        let totalMatchCount = 0;
-
-        for (const token of tokens) {
-          const inBase = normBase.includes(token);
-          const inPath = normPath.includes(token);
-          if (inBase) baseMatchCount++;
-          if (inBase || inPath) totalMatchCount++;
-        }
-
-        if (totalMatchCount === 0) continue;
-
-        let pontos = 0;
-        if (baseMatchCount === tokens.length) {
-          pontos = 100;
-          if (normBase === normQuery) {
-            pontos += 50;
-          } else if (normBase.includes(normQuery)) {
-            pontos += 30;
-          }
-          pontos -= Math.min(normBase.length, 25);
-        } else if (totalMatchCount === tokens.length) {
-          pontos = 60;
-          if (normPath.includes(normQuery)) pontos += 15;
-        } else {
-          pontos = Math.round((totalMatchCount / tokens.length) * 40);
-        }
-
-        scored.push({ file, pontos: Math.max(1, pontos) });
+        const d = pontuarNomeDetalhado(file.basename, file.path, rawQuery);
+        if (d.pontos === 0) continue;
+        scored.push({ file, pontos: d.pontos, casados: d.casados, tokens: d.tokens });
       }
 
+      scored = filtrarBaixaPontuacao(scored);
       scored.sort((a, b) => {
         if (b.pontos !== a.pontos) return b.pontos - a.pontos;
         return b.file.stat.mtime - a.file.stat.mtime;
@@ -211,7 +454,8 @@ export class VaultSearchEngine {
     }
 
     const total = scored.length;
-    const slice = scored.slice(0, limite);
+    const slice = scored.slice(offset, offset + limite);
+    const restantes = Math.max(0, total - offset - slice.length);
 
     const resultados: SearchMatch[] = slice.map(({ file, pontos }) => ({
       tipo: "nota",
@@ -223,6 +467,18 @@ export class VaultSearchEngine {
       modificada: new Date(file.stat.mtime).toLocaleString("pt-BR"),
     }));
 
+    const dicas: string[] = [];
+    if (total === 0) {
+      if (params.tag) dicas.push(...this.dicasSemResultado({ acao: "buscar_rapida", tag: params.tag }, universo, false));
+      if (rawQuery !== "") {
+        const parecidos = maisParecidos(rawQuery, universo.map((f) => f.basename));
+        dicas.push(
+          `Nenhum arquivo com '${rawQuery}' no nome ou no caminho. Tente menos palavras.` +
+            (parecidos.length > 0 ? ` Nomes parecidos: ${parecidos.join(", ")}.` : ""),
+        );
+      }
+    }
+
     return {
       consulta: {
         acao: "buscar_rapida",
@@ -231,6 +487,201 @@ export class VaultSearchEngine {
         limite,
       },
       total,
+      tempo_ms: Date.now() - startTime,
+      resultados,
+      ...(restantes > 0 ? { restantes } : {}),
+      ...(dicas.length > 0 ? { dicas } : {}),
+    };
+  }
+
+  /** Acha a nota pelo caminho, depois pelo nome, depois por parte do nome; explica a escolha. */
+  private resolverNota(files: TFile[], alvo: string): { file?: TFile; dicas: string[] } {
+    const limpo = alvo.trim().replace(/\\/g, "/").replace(/\.md$/i, "");
+    const chave = norm(limpo);
+    if (chave === "") return { dicas: [`Nota não encontrada: ${alvo}`] };
+
+    const semMd = (caminho: string) => caminho.replace(/\.md$/i, "");
+
+    const porCaminho = files.find((f) => norm(semMd(f.path)) === chave);
+    if (porCaminho) return { file: porCaminho, dicas: [] };
+
+    const porNome = files.filter((f) => norm(f.basename) === chave);
+    if (porNome.length === 1) return { file: porNome[0], dicas: [] };
+    if (porNome.length > 1) {
+      const ordenadas = [...porNome].sort((a, b) => a.path.length - b.path.length || a.path.localeCompare(b.path));
+      const escolhida = ordenadas[0];
+      const caminhos = ordenadas.slice(0, 5).map((f) => f.path).join(", ");
+      return {
+        file: escolhida,
+        dicas: [
+          `Havia ${porNome.length} notas chamadas '${alvo}': ${caminhos}. Usada: ${escolhida.path}. Informe o caminho para escolher outra.`,
+        ],
+      };
+    }
+
+    const parciais = files.filter((f) => norm(f.basename).includes(chave));
+    if (parciais.length === 1) {
+      return {
+        file: parciais[0],
+        dicas: [`Nota resolvida por correspondência parcial: ${parciais[0].path}`],
+      };
+    }
+    if (parciais.length > 1) {
+      const caminhos = parciais.slice(0, 5).map((f) => f.path).join(", ");
+      return { dicas: [`Nota ambígua '${alvo}'. Candidatas: ${caminhos}`] };
+    }
+
+    const dicas = [`Nota não encontrada: ${alvo}`];
+    const parecidas = maisParecidos(alvo, files.map((f) => f.basename));
+    if (parecidas.length > 0) dicas.push(`Parecidas: ${parecidas.join(", ")}`);
+    return { dicas };
+  }
+
+  /** Lê uma nota numa chamada: frontmatter escolhido, esboço, links de saída e início do corpo. */
+  async lerNota(params: LerNotaParams): Promise<SearchResultPayload> {
+    const startTime = Date.now();
+    const resolucao = this.resolverNota(this.getMarkdownFiles(), params.nota);
+    const file = resolucao.file;
+
+    if (!file) {
+      return {
+        consulta: { acao: "ler_nota", nota: params.nota },
+        total: 0,
+        tempo_ms: Date.now() - startTime,
+        resultados: [],
+        dicas: resolucao.dicas,
+      };
+    }
+
+    const cache = this.app.metadataCache.getFileCache(file);
+    const resultado: SearchMatch = { tipo: "nota", caminho: file.path, nome: file.basename };
+
+    // Sem `frontmatter` ou com "*" vem tudo; lista vazia não vem nada.
+    const pedidas = params.frontmatter;
+    if (cache?.frontmatter && (pedidas === undefined || pedidas.length > 0)) {
+      const todas = pedidas === undefined || pedidas.includes("*");
+      const nomes = new Set((pedidas ?? []).map((p) => norm(p)));
+      const escolhidas: Record<string, unknown> = {};
+      for (const [chave, valor] of Object.entries(cache.frontmatter)) {
+        if (chave === "position") continue;
+        if (todas || nomes.has(norm(chave))) escolhidas[chave] = valor;
+      }
+      resultado.frontmatter = escolhidas;
+    }
+
+    if (params.outline !== false) {
+      resultado.outline = (cache?.headings ?? []).map((h) => ({
+        nivel: h.level,
+        titulo: h.heading,
+        linha: h.position.start.line + 1,
+      }));
+    }
+
+    if (params.outlinks !== false) {
+      resultado.outlinks = this.extractOutlinks(file);
+    }
+
+    // Só lê o corpo quando ele é pedido.
+    if (typeof params.corpo === "number" && params.corpo > 0) {
+      const linhas = (await this.app.vault.cachedRead(file)).split(/\r?\n/);
+      let inicio = 0;
+      if (linhas[0]?.trim() === "---") {
+        const fecha = linhas.findIndex((l, i) => i > 0 && l.trim() === "---");
+        if (fecha > 0) inicio = fecha + 1;
+      }
+      const corpo = linhas.slice(inicio).join("\n").trim();
+      if (corpo.length > params.corpo) {
+        resultado.corpo = corpo.slice(0, params.corpo);
+        resultado.corpo_truncado = true;
+      } else {
+        resultado.corpo = corpo;
+      }
+    }
+
+    return {
+      consulta: { acao: "ler_nota", nota: file.basename },
+      total: 1,
+      tempo_ms: Date.now() - startTime,
+      resultados: [resultado],
+      ...(resolucao.dicas.length > 0 ? { dicas: resolucao.dicas } : {}),
+    };
+  }
+
+  // Pasta pedida sem diferenciar maiúsculas nem barras; se não existir, sugere as parecidas.
+  private resolverPasta(pasta: string): { real?: string; sugestoes: string[] } {
+    const alvo = pasta.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+    if (alvo === "") return { real: "", sugestoes: [] };
+
+    const pastas = this.app.vault
+      .getAllLoadedFiles()
+      .filter((f) => f instanceof TFolder && f.path !== "/" && f.path !== "" && !this.ignored(f.path))
+      .map((f) => f.path);
+
+    const exata = pastas.find((p) => p === alvo);
+    if (exata !== undefined) return { real: exata, sugestoes: [] };
+    const semCaixa = pastas.find((p) => p.toLowerCase() === alvo.toLowerCase());
+    if (semCaixa !== undefined) return { real: semCaixa, sugestoes: [] };
+    return { sugestoes: maisParecidos(alvo, pastas, 5) };
+  }
+
+  private dicasPastaNaoEncontrada(pasta: string, sugestoes: string[]): string[] {
+    return [
+      `Pasta não encontrada: ${pasta}`,
+      ...(sugestoes.length > 0 ? [`Parecidas: ${sugestoes.join(", ")}`] : []),
+    ];
+  }
+
+  /** Tags das notas visíveis com quantas notas usam cada uma; mais usadas primeiro. */
+  listarTags(params: { prefixo?: string; limite?: number }): {
+    total: number;
+    restantes?: number;
+    tags: { tag: string; contagem: number }[];
+  } {
+    const contagens = new Map<string, number>();
+    for (const file of this.getMarkdownFiles()) {
+      for (const tag of this.extractTags(file)) {
+        contagens.set(tag, (contagens.get(tag) ?? 0) + 1);
+      }
+    }
+
+    const prefixo = norm((params.prefixo ?? "").replace(/^#/, ""));
+    const lista = [...contagens.entries()]
+      .filter(([tag]) => norm(tag).startsWith(prefixo))
+      .map(([tag, contagem]) => ({ tag, contagem }))
+      .sort((a, b) => b.contagem - a.contagem || a.tag.localeCompare(b.tag));
+
+    const total = lista.length;
+    const limite = params.limite ?? 50;
+    const tags = limite > 0 ? lista.slice(0, limite) : lista;
+    const restantes = total - tags.length;
+    return { total, ...(restantes > 0 ? { restantes } : {}), tags };
+  }
+
+  /** Notas visíveis mais recentemente modificadas, com filtro opcional de pasta e tag. */
+  notasRecentes(params: { limite?: number; pasta?: string; tag?: string }): SearchResultPayload {
+    const startTime = Date.now();
+    let files = this.filtrarPorPasta(this.getMarkdownFiles(), params.pasta);
+
+    if (params.tag) {
+      const tagAlvo = norm(params.tag.replace(/^#/, "").replace(/\/$/, ""));
+      files = files.filter((f) => {
+        const tags = this.extractTags(f).map((t) => norm(t));
+        return tags.some((t) => t === tagAlvo || t.startsWith(tagAlvo + "/"));
+      });
+    }
+
+    const ordenadas = [...files].sort((a, b) => b.stat.mtime - a.stat.mtime);
+    const limite = params.limite && params.limite > 0 ? params.limite : 10;
+    const resultados: SearchMatch[] = ordenadas.slice(0, limite).map((f) => ({
+      tipo: "nota",
+      caminho: f.path,
+      nome: f.basename,
+      modificada: new Date(f.stat.mtime).toLocaleString("pt-BR"),
+    }));
+
+    return {
+      consulta: { acao: "recentes" },
+      total: ordenadas.length,
       tempo_ms: Date.now() - startTime,
       resultados,
     };
@@ -250,7 +701,17 @@ export class VaultSearchEngine {
     if (acao === "listar_pastas") {
       const pastaBase = params.pasta || "";
       const recursivo = params.recursivo === true;
-      const targetFolder = this.app.vault.getAbstractFileByPath(pastaBase || "/");
+      const resolvida = this.resolverPasta(pastaBase);
+      if (pastaBase && resolvida.real === undefined) {
+        return {
+          consulta: { acao, pasta: pastaBase, recursivo },
+          total: 0,
+          tempo_ms: Date.now() - startTime,
+          resultados: [],
+          dicas: this.dicasPastaNaoEncontrada(pastaBase, resolvida.sugestoes),
+        };
+      }
+      const targetFolder = this.app.vault.getAbstractFileByPath(resolvida.real || "/");
 
       const folders: SearchMatch[] = [];
 
@@ -323,9 +784,26 @@ export class VaultSearchEngine {
       const limite = params.limite || 50;
 
       let allFiles = this.app.vault.getFiles().filter((f) => !this.ignored(f.path));
+      let pastaExiste = false;
       if (pasta) {
-        const normPasta = pasta.replace(/\/$/, "");
-        if (recursivo) {
+        const resolvida = this.resolverPasta(pasta);
+        if (resolvida.real === undefined) {
+          return {
+            consulta: { acao, pasta, extensao: ext, recursivo },
+            total: 0,
+            tempo_ms: Date.now() - startTime,
+            resultados: [],
+            dicas: this.dicasPastaNaoEncontrada(pasta, resolvida.sugestoes),
+          };
+        }
+        pastaExiste = true;
+        const normPasta = resolvida.real;
+        if (normPasta === "") {
+          // Raiz: o Obsidian usa "/" como caminho da pasta raiz, mas aceita "" também.
+          if (!recursivo) {
+            allFiles = allFiles.filter((f) => f.parent?.path === "/" || f.parent?.path === "");
+          }
+        } else if (recursivo) {
           allFiles = allFiles.filter((f) => f.path.startsWith(normPasta + "/"));
         } else {
           allFiles = allFiles.filter((f) => f.parent?.path === normPasta);
@@ -342,6 +820,11 @@ export class VaultSearchEngine {
       allFiles.sort((a, b) => b.stat.mtime - a.stat.mtime);
       const total = allFiles.length;
       const slice = allFiles.slice(0, limite);
+
+      const dicas: string[] = [];
+      if (pastaExiste && total === 0 && ext !== "*") {
+        dicas.push(`A pasta existe, mas não tem arquivos .${ext}. Use extensao: "*"${recursivo ? "" : " ou recursivo: true"}.`);
+      }
 
       const resultados: SearchMatch[] = slice.map((f) => {
         const cache = this.app.metadataCache.getFileCache(f);
@@ -362,6 +845,7 @@ export class VaultSearchEngine {
         total,
         tempo_ms: Date.now() - startTime,
         resultados,
+        ...(dicas.length > 0 ? { dicas } : {}),
       };
     }
 
@@ -373,9 +857,8 @@ export class VaultSearchEngine {
       const cabecalhoAlvo = params.cabecalho ? String(params.cabecalho).toLowerCase().trim() : undefined;
 
       const files = this.app.vault.getMarkdownFiles().filter((f) => !isExcluded(f.path, this.excludedFolders));
-      const file = files.find(
-        (f) => f.path === notaAlvo || f.basename.toLowerCase() === notaAlvo.toLowerCase()
-      );
+      const resolucao = this.resolverNota(files, notaAlvo);
+      const file = resolucao.file;
 
       if (!file) {
         return {
@@ -383,13 +866,13 @@ export class VaultSearchEngine {
           total: 0,
           tempo_ms: Date.now() - startTime,
           resultados: [],
-          dicas: [`Nota não encontrada: ${notaAlvo}`],
+          dicas: resolucao.dicas,
         };
       }
 
       const content = await this.app.vault.cachedRead(file);
       const cache = this.app.metadataCache.getFileCache(file);
-      const lines = content.split("\n");
+      const lines = content.split(/\r?\n/);
 
       // Suporte a intervalo de linhas (linha_inicio / linha_fim)
       if (params.linha_inicio !== undefined || params.linha_fim !== undefined) {
@@ -409,6 +892,7 @@ export class VaultSearchEngine {
               conteudo: sliced.join("\n"),
             },
           ],
+          ...(resolucao.dicas.length > 0 ? { dicas: resolucao.dicas } : {}),
         };
       }
 
@@ -430,6 +914,7 @@ export class VaultSearchEngine {
               cabecalhos_disponiveis: headings,
             },
           ],
+          ...(resolucao.dicas.length > 0 ? { dicas: resolucao.dicas } : {}),
         };
       }
 
@@ -438,18 +923,17 @@ export class VaultSearchEngine {
       let endIndex = lines.length;
       let foundHeading: string | undefined;
 
-      for (let i = 0; i < headings.length; i++) {
+      const escolhido = escolherCabecalho(headings, (h) => h.heading, cabecalhoAlvo);
+      const i = escolhido ? headings.indexOf(escolhido) : -1;
+      if (i >= 0) {
         const h = headings[i];
-        if (h.heading.toLowerCase().includes(cabecalhoAlvo)) {
-          startIndex = h.position.start.line;
-          foundHeading = h.heading;
-          for (let j = i + 1; j < headings.length; j++) {
-            if (headings[j].level <= h.level) {
-              endIndex = headings[j].position.start.line;
-              break;
-            }
+        startIndex = h.position.start.line;
+        foundHeading = h.heading;
+        for (let j = i + 1; j < headings.length; j++) {
+          if (headings[j].level <= h.level) {
+            endIndex = headings[j].position.start.line;
+            break;
           }
-          break;
         }
       }
 
@@ -460,6 +944,7 @@ export class VaultSearchEngine {
           tempo_ms: Date.now() - startTime,
           resultados: [],
           dicas: [
+            ...resolucao.dicas,
             `Cabeçalho '${cabecalhoAlvo}' não encontrado. Disponíveis: ${headings.map((h) => h.heading).join(", ")}`,
           ],
         };
@@ -480,6 +965,7 @@ export class VaultSearchEngine {
             conteudo: sectionLines.join("\n"),
           },
         ],
+        ...(resolucao.dicas.length > 0 ? { dicas: resolucao.dicas } : {}),
       };
     }
 
@@ -530,8 +1016,35 @@ export class VaultSearchEngine {
     // -------------------------------------------------------------
     // AÇÃO PADRÃO: Busca Híbrida de Notas
     // -------------------------------------------------------------
+    // Sem nenhum critério a busca não devolve o cofre inteiro; pede um critério.
+    // prop vazio ([] ou [""]) não conta como critério nem filtra.
+    const propsValidas = ([] as string[])
+      .concat(params.prop ?? [])
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const temCriterio =
+      (params.termos ?? []).some((t) => norm(t) !== "") ||
+      Boolean(params.titulo || params.nota || params.filhas || params.arvore || params.tag || params.backlinks) ||
+      propsValidas.length > 0;
+    if (!temCriterio) {
+      return {
+        consulta: { acao },
+        total: 0,
+        tempo_ms: Date.now() - startTime,
+        resultados: [],
+        dicas: [
+          "Informe ao menos um critério: termos, tag, filhas, arvore, backlinks, prop, titulo ou nota. Para listar arquivos de uma pasta use list_files; para achar por nome use find.",
+        ],
+      };
+    }
+
     const files = this.getMarkdownFiles();
-    let candidates = files;
+    // Pasta e extensão só restringem os candidatos; o índice e as demais ações seguem com todas as notas.
+    let candidates = this.filtrarPorPasta(files, params.pasta);
+    const ext = (params.extensao || "md").trim().replace(/^\./, "").toLowerCase();
+    if (ext !== "*") {
+      candidates = candidates.filter((f) => f.extension.toLowerCase() === ext);
+    }
 
     if (params.titulo) {
       const tituloAlvo = norm(params.titulo);
@@ -564,6 +1077,51 @@ export class VaultSearchEngine {
       });
     }
 
+    if (params.arvore) {
+      const raizNorm = norm(params.arvore);
+      const raizes = files.filter((f) => norm(f.basename) === raizNorm);
+      if (raizes.length === 0) {
+        return {
+          consulta: { acao, arvore: params.arvore },
+          total: 0,
+          tempo_ms: Date.now() - startTime,
+          resultados: [],
+          dicas: [`Nota raiz não encontrada: ${params.arvore}`],
+        };
+      }
+
+      // Notas filhas indexadas pelo nome do pai (up:).
+      const filhosDe = new Map<string, TFile[]>();
+      for (const f of files) {
+        for (const pai of this.extractUp(f)) {
+          const chave = norm(pai);
+          const lista = filhosDe.get(chave);
+          if (lista) lista.push(f);
+          else filhosDe.set(chave, [f]);
+        }
+      }
+
+      // Busca em largura. Os paths já vistos (raízes incluídas) não entram de novo: ciclos param aqui.
+      const maxProf = params.profundidade && params.profundidade > 0 ? params.profundidade : 10;
+      const visitados = new Set(raizes.map((f) => f.path));
+      const descendentes = new Set<string>();
+      let nomesNivel = [raizNorm];
+      for (let nivel = 1; nivel <= maxProf && nomesNivel.length > 0; nivel++) {
+        const proximos: string[] = [];
+        for (const nome of nomesNivel) {
+          for (const filha of filhosDe.get(nome) ?? []) {
+            if (visitados.has(filha.path)) continue;
+            visitados.add(filha.path);
+            descendentes.add(filha.path);
+            proximos.push(norm(filha.basename));
+          }
+        }
+        nomesNivel = proximos;
+      }
+
+      candidates = candidates.filter((f) => descendentes.has(f.path));
+    }
+
     if (params.tag) {
       const tagAlvo = norm(params.tag.replace(/^#/, "").replace(/\/$/, ""));
       candidates = candidates.filter((f) => {
@@ -581,106 +1139,57 @@ export class VaultSearchEngine {
       });
     }
 
-    if (params.prop) {
-      const [key, val] = params.prop.split("=");
-      const keyNorm = norm(key);
-      const valNorm = val ? norm(val) : undefined;
+    if (propsValidas.length > 0) candidates = this.filtrarPorProp(candidates, propsValidas);
 
-      candidates = candidates.filter((f) => {
-        const fm = this.app.metadataCache.getFileCache(f)?.frontmatter;
-        if (!fm) return false;
-        for (const [k, v] of Object.entries(fm)) {
-          if (norm(k) === keyNorm) {
-            if (!valNorm) return true;
-            return norm(String(v)).includes(valNorm);
-          }
-        }
-        return false;
+    // Termos viram palavras do índice; sinônimos só quando a busca não é exata.
+    const opcoesTermos = { sinonimos: params.sinonimos === true, exato: params.exato === true };
+    const termosConsulta = this.montarTermosConsulta(params.termos ?? [], opcoesTermos);
+    const pediuTermos = (params.termos ?? []).some((t) => norm(t) !== "");
+    let pontuacao: Map<string, number> | undefined;
+
+    if (termosConsulta.length > 0) {
+      await this.sincronizarIndice(files);
+      const pontuados = this.indice.pontuar(termosConsulta, {
+        exato: opcoesTermos.exato,
+        candidatos: new Set(candidates.map((f) => f.path)),
       });
+      pontuacao = pontuados;
+      candidates = candidates.filter((f) => pontuados.has(f.path));
+    } else if (pediuTermos) {
+      // Termos sem nenhuma palavra buscável (só pontuação) não casam com nada.
+      candidates = [];
     }
 
-    const termos = (params.termos || []).map((t) => norm(t)).filter(Boolean);
-    const results: SearchMatch[] = [];
+    // Ordena pela pontuação bruta; o campo pontos é só a versão arredondada para exibir.
+    const ranqueados = candidates.map((file) => {
+      const bruto = pontuacao?.get(file.path) ?? 0;
+      return { file, bruto, pontos: pontuacao ? Math.max(1, Math.round(bruto * 10)) : undefined };
+    });
+    ranqueados.sort((a, b) => b.bruto - a.bruto || a.file.basename.localeCompare(b.file.basename));
 
-    for (const file of candidates) {
+    const total = ranqueados.length;
+    const limite = params.limite ?? 10;
+    const offset = Math.max(0, Math.floor(params.offset ?? 0));
+    const pagina = limite > 0 ? ranqueados.slice(offset, offset + limite) : ranqueados.slice(offset);
+    const restantes = Math.max(0, total - offset - pagina.length);
+
+    // Trecho e seção são lidos só para a página devolvida.
+    const paginados: SearchMatch[] = [];
+    for (const { file, pontos } of pagina) {
       const tags = this.extractTags(file);
       const ups = this.extractUp(file);
       const cache = this.app.metadataCache.getFileCache(file);
       const frontmatter = cache?.frontmatter || {};
+      const achado: TrechoNota =
+        termosConsulta.length > 0
+          ? await this.localizarTrecho(file, termosConsulta, {
+              exato: opcoesTermos.exato,
+              secao: Boolean(params.secao),
+              detalhe: params.detalhe === true,
+            })
+          : {};
 
-      let pontos: number | undefined = 0;
-      let melhorLinha: number | undefined;
-      let melhorTrecho: string | undefined;
-      let secaoTitulo: string | undefined;
-      let secaoLinha: number | undefined;
-      let secaoTrecho: string | undefined;
-
-      if (termos.length > 0) {
-        const fileContent = await this.app.vault.cachedRead(file);
-        const linhas = fileContent.split("\n");
-        const normNome = norm(file.basename);
-        const normTags = tags.map((t) => norm(t)).join(" ");
-        const normUps = ups.map((u) => norm(u)).join(" ");
-
-        let termosPresentes = 0;
-
-        for (const termo of termos) {
-          const variantes = getVariantes(termo);
-          let termoPontos = 0;
-
-          const matchVariante = (texto: string) => {
-            for (const v of variantes) {
-              if (texto.includes(v)) return true;
-            }
-            return false;
-          };
-
-          if (matchVariante(normNome)) termoPontos += 30;
-          if (matchVariante(normTags)) termoPontos += 15;
-          if (matchVariante(normUps)) termoPontos += 10;
-
-          let ocorrenciasCorpo = 0;
-          for (let idx = 0; idx < linhas.length; idx++) {
-            const lNorm = norm(linhas[idx]);
-            if (matchVariante(lNorm)) {
-              ocorrenciasCorpo++;
-              if (melhorLinha === undefined) {
-                melhorLinha = idx + 1;
-                melhorTrecho = linhas[idx].trim().slice(0, 200);
-              }
-            }
-          }
-
-          if (ocorrenciasCorpo > 0) {
-            termoPontos += Math.min(ocorrenciasCorpo * 2, 20);
-          }
-
-          if (termoPontos > 0) {
-            termosPresentes++;
-            pontos += termoPontos;
-          }
-        }
-
-        if (termosPresentes === 0) continue;
-
-        const cobertura = termosPresentes / termos.length;
-        pontos = Math.round(pontos * Math.pow(cobertura, 1.3));
-
-        if (params.secao && cache?.headings) {
-          for (const h of cache.headings) {
-            if (h.position.start.line <= (melhorLinha || 1)) {
-              secaoTitulo = h.heading;
-              secaoLinha = h.position.start.line + 1;
-              const fimLinha = Math.min(h.position.start.line + 8, linhas.length);
-              secaoTrecho = linhas.slice(h.position.start.line, fimLinha).join(" ").trim().slice(0, 300);
-            }
-          }
-        }
-      } else {
-        pontos = undefined;
-      }
-
-      results.push({
+      paginados.push({
         tipo: "nota",
         caminho: file.path,
         nome: file.basename,
@@ -688,21 +1197,31 @@ export class VaultSearchEngine {
         up: ups,
         modificada: new Date(file.stat.mtime).toLocaleString("pt-BR"),
         pontos,
-        linha: melhorLinha,
-        trecho: melhorTrecho,
-        secao_titulo: secaoTitulo,
-        secao_linha: secaoLinha,
-        secao_trecho: secaoTrecho,
+        linha: achado.linha,
+        trecho: achado.trecho,
+        secao_titulo: achado.secaoTitulo,
+        secao_linha: achado.secaoLinha,
+        secao_trecho: achado.secaoTrecho,
         skill: frontmatter.skill,
         efeito: frontmatter.efeito,
       });
     }
 
-    results.sort((a, b) => (b.pontos || 0) - (a.pontos || 0) || a.nome.localeCompare(b.nome));
+    // Com ler, só o primeiro resultado da página traz a seção em que o termo casou.
+    if (params.ler === true && paginados.length > 0) {
+      const primeiro = paginados[0];
+      const file = files.find((f) => f.path === primeiro.caminho);
+      if (file) {
+        const sec = await this.lerSecaoDoResultado(file, primeiro.linha);
+        primeiro.conteudo = sec.conteudo;
+        if (sec.titulo !== undefined) {
+          primeiro.secao_titulo = sec.titulo;
+          primeiro.secao_linha = sec.linhaInicio;
+        }
+      }
+    }
 
-    const total = results.length;
-    const limite = params.limite ?? 10;
-    const paginados = limite > 0 ? results.slice(0, limite) : results;
+    const dicas = total === 0 ? this.dicasSemResultado(params, files, pediuTermos) : [];
 
     return {
       consulta: {
@@ -717,6 +1236,8 @@ export class VaultSearchEngine {
       total,
       tempo_ms: Date.now() - startTime,
       resultados: paginados,
+      ...(restantes > 0 ? { restantes } : {}),
+      ...(dicas.length > 0 ? { dicas } : {}),
     };
   }
 }

@@ -21,14 +21,14 @@ export function normalizar(texto: string): string {
 
 // Returns the lines that contain any of the terms, in file order, at most `opts.max` of them.
 export function searchText(
-  conteudo: string,
+  conteudo: string | readonly string[],
   termos: string[],
   opts: { extensao: string; max: number },
 ): TrechoEncontrado[] {
   const alvos = termos.map(normalizar).filter((t) => t !== "");
   if (alvos.length === 0) return [];
 
-  const linhas = conteudo.split(/\r?\n/);
+  const linhas = typeof conteudo === "string" ? conteudo.split(/\r?\n/) : conteudo;
   const ehCodigo = tipoDoArquivo(opts.extensao) === "codigo";
   const resultado: TrechoEncontrado[] = [];
 

@@ -32,6 +32,19 @@ export interface SearchMatch {
   linha_inicio?: number;
   linha_fim?: number;
   simbolos_disponiveis?: { nome: string; tipo: string; linha: number }[];
+  frontmatter?: Record<string, unknown>;
+  outline?: { nivel: number; titulo: string; linha: number }[];
+  outlinks?: string[];
+  corpo?: string;
+  corpo_truncado?: boolean;
+}
+
+export interface LerNotaParams {
+  nota: string;
+  frontmatter?: string[];
+  outline?: boolean;
+  outlinks?: boolean;
+  corpo?: number;
 }
 
 export interface SearchQueryParams {
@@ -51,14 +64,15 @@ export interface SearchQueryParams {
   arvore?: string;
   profundidade?: number;
   backlinks?: string;
-  links?: string;
-  prop?: string;
+  prop?: string | string[];
   nota?: string;
-  recentes?: number;
   limite?: number;
-  modo?: "hibrido" | "exato" | "semantico";
+  offset?: number;
   secao?: boolean;
-  compacto?: boolean;
+  detalhe?: boolean;
+  ler?: boolean;
+  sinonimos?: boolean;
+  exato?: boolean;
   linha_inicio?: number;
   linha_fim?: number;
 }
@@ -67,6 +81,8 @@ export interface SearchResultPayload {
   consulta: Record<string, unknown>;
   total: number;
   resultados: SearchMatch[];
+  truncado?: boolean;
+  restantes?: number;
   dicas?: string[];
   tempo_ms?: number;
   estatisticas?: Record<string, unknown>;

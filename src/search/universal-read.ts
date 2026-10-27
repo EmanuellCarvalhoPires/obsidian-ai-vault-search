@@ -7,7 +7,8 @@ import { carregarConteudo } from "./file-content";
 import { tipoDoArquivo } from "./extensions";
 import { displayPath, isAbsolutePath } from "./path-resolver";
 import { extractSymbolBlock, listSymbols } from "./symbols";
-import { normalizar } from "./text-search";
+import { ehCaminhoBloqueado, redigirMatch } from "./protecao";
+import { escolherCabecalho } from "./cabecalho";
 import type { SearchMatch, SearchResultPayload } from "./types";
 import type { UniversalContext } from "./universal-search";
 
@@ -34,6 +35,8 @@ interface Cabecalho {
 
 const LINHAS_PADRAO = 200;
 const CABECALHO_MD = /^(#{1,6})\s+(.*)$/;
+// Opening or closing code fence: three or more backticks or tildes.
+const CERCA_MD = /^\s{0,3}(\x60{3,}|~{3,})/;
 
 // Number of lines, not counting the empty string left after a final newline.
 function contarLinhas(linhas: string[]): number {
@@ -52,12 +55,40 @@ function temIntervalo(p: LeituraParams): boolean {
   return p.linha_inicio !== undefined || p.linha_fim !== undefined;
 }
 
+// Headings of a markdown note. The frontmatter and the lines inside code fences are not headings.
 function cabecalhosMd(linhas: string[]): Cabecalho[] {
   const saida: Cabecalho[] = [];
-  linhas.forEach((texto, i) => {
+
+  let inicio = 0;
+  if (linhas[0]?.trim() === "---") {
+    const fecha = linhas.findIndex((l, i) => i > 0 && l.trim() === "---");
+    if (fecha > 0) inicio = fecha + 1;
+  }
+
+  let cerca: { char: string; tamanho: number } | undefined;
+  for (let i = inicio; i < linhas.length; i++) {
+    const texto = linhas[i];
+    const marca = CERCA_MD.exec(texto);
+
+    if (cerca !== undefined) {
+      // A closing fence uses the same character, is at least as long, and has nothing else on the line.
+      const fecha =
+        marca !== null &&
+        marca[1][0] === cerca.char &&
+        marca[1].length >= cerca.tamanho &&
+        texto.slice(marca[0].length).trim() === "";
+      if (fecha) cerca = undefined;
+      continue;
+    }
+
+    if (marca !== null) {
+      cerca = { char: marca[1][0], tamanho: marca[1].length };
+      continue;
+    }
+
     const m = CABECALHO_MD.exec(texto);
     if (m) saida.push({ nivel: m[1].length, titulo: m[2].trim(), linha: i + 1 });
-  });
+  }
   return saida;
 }
 
@@ -115,8 +146,7 @@ function lerCodigo(linhas: string[], ext: string, base: SearchMatch, p: LeituraP
 // Markdown section: from the first heading containing `secao` to the next heading of the same or higher level.
 function lerSecaoMarkdown(linhas: string[], secao: string, base: SearchMatch): Saida {
   const cabecalhos = cabecalhosMd(linhas);
-  const alvo = normalizar(secao);
-  const achado = cabecalhos.find((c) => normalizar(c.titulo).includes(alvo));
+  const achado = escolherCabecalho(cabecalhos, (c) => c.titulo, secao);
   if (achado === undefined) {
     const titulos = cabecalhos.map((c) => c.titulo).join(", ") || "nenhum";
     return { dicas: [`Seção '${secao}' não encontrada. Cabeçalhos: ${titulos}`] };
@@ -159,8 +189,9 @@ function lerTexto(linhas: string[], ext: string, base: SearchMatch, p: LeituraPa
 // Word document: a section by heading, a paragraph index range, or the heading list.
 function lerDocx(paragrafos: Paragrafo[], base: SearchMatch, p: LeituraParams): Saida {
   if (p.secao !== undefined) {
-    const alvo = normalizar(p.secao);
-    const idx = paragrafos.findIndex((q) => q.nivel !== undefined && normalizar(q.texto).includes(alvo));
+    const candidatos = paragrafos.filter((q) => q.nivel !== undefined);
+    const escolhido = escolherCabecalho(candidatos, (q) => q.texto, p.secao);
+    const idx = escolhido ? paragrafos.indexOf(escolhido) : -1;
     if (idx < 0) {
       const titulos = cabecalhosDocx(paragrafos).map((c) => c.titulo).join(", ") || "nenhum";
       return { dicas: [`Seção '${p.secao}' não encontrada. Cabeçalhos: ${titulos}`] };
@@ -269,6 +300,9 @@ export async function getSectionUniversal(p: LeituraParams, ctx: UniversalContex
     ctx.basePath === "" ? alvo.replace(/\\/g, "/") : displayPath(alvo, ctx.basePath);
   const naoEncontrado = vazio([`Arquivo não encontrado: ${arquivo}`]);
   if (isExcluded(caminhoDe(abs), ctx.excluidas)) return naoEncontrado;
+  if (ehCaminhoBloqueado(abs) || ehCaminhoBloqueado(caminhoDe(abs))) {
+    return vazio(["Acesso bloqueado: arquivo de credenciais ou de configuração sensível"]);
+  }
 
   const info = await stat(abs).catch(() => undefined);
   if (info?.isDirectory()) {
@@ -313,7 +347,7 @@ export async function getSectionUniversal(p: LeituraParams, ctx: UniversalContex
   return {
     consulta,
     total: 1,
-    resultados: [saida.achado],
+    resultados: [redigirMatch(saida.achado)],
     ...(saida.dicas !== undefined ? { dicas: saida.dicas } : {}),
     tempo_ms: Date.now() - inicio,
   };
