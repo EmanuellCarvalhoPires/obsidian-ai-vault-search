@@ -162,14 +162,14 @@ describe("limite padrao das tools universais", () => {
   const handler = (nome: string) => tools.find((t) => t.name === nome)!.handler;
 
   it("search sem limite devolve 10 e marca truncado", async () => {
-    const res = await handler("search")({ pasta: dir, extensoes: ["txt"], termos: ["alvo"] }, {} as never);
+    const res = await handler("search")({ pasta: dir, extensoes: ["txt"], termos: ["alvo"], compacto: false }, {} as never);
     const corpo = lerJson(res);
     expect(corpo.total).toBe(10);
     expect(corpo.truncado).toBe(true);
   });
 
   it("find sem limite devolve 10 resultados", async () => {
-    const res = await handler("find")({ query: "arq", pasta: dir, extensoes: ["txt"] }, {} as never);
+    const res = await handler("find")({ query: "arq", pasta: dir, extensoes: ["txt"], compacto: false }, {} as never);
     const corpo = lerJson(res);
     expect(corpo.resultados).toHaveLength(10);
   });

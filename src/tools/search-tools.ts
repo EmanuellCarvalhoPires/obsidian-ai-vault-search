@@ -85,7 +85,9 @@ export function createSearchTools(
         result = await engine.search(queryParams);
       }
 
-      if (args.compacto === true) {
+      // Compact by default; detalhe or ler need the JSON fields, and compacto: false forces JSON.
+      const compacto = args.compacto === undefined ? !detalhe && args.ler !== true : args.compacto === true;
+      if (compacto) {
         return ripgrepResult(result);
       }
       return jsonResult(enxugar(result, detalhe, agrupar));
@@ -123,7 +125,9 @@ export function createSearchTools(
         });
       }
 
-      if (args.compacto === true) {
+      // Compact by default; detalhe needs the JSON fields, and compacto: false forces JSON.
+      const compacto = args.compacto === undefined ? !detalhe : args.compacto === true;
+      if (compacto) {
         return ripgrepResult(result);
       }
       return jsonResult(enxugar(result, detalhe));
@@ -180,8 +184,8 @@ export function createSearchTools(
     },
     compacto: {
       type: "boolean",
-      default: false,
-      description: "Retorna linhas compactas estilo ripgrep (caminho:linha:trecho) para economia de tokens",
+      default: true,
+      description: "Retorna linhas compactas estilo ripgrep (caminho:linha:trecho) para economia de tokens. Padrão: ligado; passe false (ou use detalhe) para o JSON completo",
     },
     limite: {
       type: "integer",
@@ -257,8 +261,8 @@ export function createSearchTools(
     },
     compacto: {
       type: "boolean",
-      default: false,
-      description: "Retorna linhas compactas estilo ripgrep (caminho:linha:trecho) para economia de tokens",
+      default: true,
+      description: "Retorna linhas compactas estilo ripgrep (caminho:linha:trecho) para economia de tokens. Padrão: ligado; passe false (ou use detalhe) para o JSON completo",
     },
     detalhe: {
       type: "boolean",
@@ -470,11 +474,23 @@ export function createSearchTools(
     },
     handler: async (args: Record<string, unknown>): Promise<HubToolResult> => {
       try {
+        const prefixo = args.prefixo as string | undefined;
         const result = engine.listarTags({
-          prefixo: args.prefixo as string | undefined,
-          limite: (args.limite as number) || 50,
+          prefixo,
+          limite: (args.limite as number) ?? 50,
         });
-        return jsonResult(result);
+        const dicas: string[] = [];
+        if (result.total === 0) {
+          dicas.push(
+            prefixo
+              ? `Nenhuma tag começa com "${prefixo}". Use list_tags sem prefixo para ver as existentes.`
+              : "O cofre não tem tags nas notas.",
+          );
+        }
+        if (result.restantes) {
+          dicas.push(`Há mais ${result.restantes} tags. Use limite maior ou 0 para todas.`);
+        }
+        return jsonResult(dicas.length > 0 ? { ...result, dicas } : result);
       } catch (err) {
         return errorResult("Erro na execução do list_tags", err);
       }
@@ -520,9 +536,14 @@ export function createSearchTools(
           pasta: args.pasta as string | undefined,
           tag: args.tag as string | undefined,
         });
+        const dicas =
+          r.total === 0
+            ? ["Nenhuma nota encontrada com esses filtros. Confira o nome da pasta com list_folders ou o da tag com list_tags."]
+            : [];
         return jsonResult({
           total: r.total,
           resultados: r.resultados.map((x) => ({ caminho: x.caminho, modificada: x.modificada })),
+          ...(dicas.length > 0 ? { dicas } : {}),
         });
       } catch (err) {
         return errorResult("Erro na execução do recent_notes", err);

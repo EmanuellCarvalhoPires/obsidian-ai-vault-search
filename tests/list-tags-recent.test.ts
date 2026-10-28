@@ -44,6 +44,26 @@ describe("tool list_tags", () => {
     const r = await chamar("list_tags", { prefixo: "dev" });
     expect(r.tags.map((t: { tag: string }) => t.tag)).toEqual(["dev", "dev/api"]);
   });
+
+  it("limite 0 devolve todas as tags, inclusive acima de 50", async () => {
+    const notas = Array.from({ length: 55 }, (_, i) => ({
+      path: `Lote/n${i}.md`,
+      content: `---\ntags: [t${i}]\n---\n# n${i}\n`,
+      mtime: 1_700_000_000_000 + i,
+    }));
+    const motor = new VaultSearchEngine(fakeVault(notas));
+    const ferramenta = createSearchTools(fakeVault(notas), motor).find((t) => t.name === "list_tags")!;
+    const res = await ferramenta.handler({ limite: 0 }, {} as never);
+    const r = JSON.parse((res.content[0] as { text: string }).text);
+    expect(r.tags).toHaveLength(55);
+    expect(r.restantes).toBeUndefined();
+  });
+
+  it("dá dica quando o prefixo não acha nenhuma tag", async () => {
+    const r = await chamar("list_tags", { prefixo: "zzz" });
+    expect(r.total).toBe(0);
+    expect(r.dicas[0]).toContain("zzz");
+  });
 });
 
 describe("tool recent_notes", () => {
@@ -59,11 +79,17 @@ describe("tool recent_notes", () => {
       "Projetos/P2.md",
     ]);
   });
+
+  it("sem notas para o filtro devolve dica", async () => {
+    const r = await chamar("recent_notes", { tag: "zzz" });
+    expect(r.total).toBe(0);
+    expect(r.dicas).toHaveLength(1);
+  });
 });
 
 describe("search com prop em lista", () => {
   it("vale a conjunção das condições", async () => {
-    const r = await chamar("search", { prop: ["status=ativo", "epico=PROJ-4"] });
+    const r = await chamar("search", { prop: ["status=ativo", "epico=PROJ-4"], compacto: false });
     expect(r.resultados.map((x: { caminho: string }) => x.caminho)).toEqual(["Projetos/P1.md"]);
   });
 });

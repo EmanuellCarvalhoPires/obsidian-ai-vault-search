@@ -1,6 +1,6 @@
 # AI Vault Search
 
-Fast in-memory search (note graph + Markdown sections, ranked with BM25 over an in-memory index kept up to date by Obsidian events) over the Obsidian vault and over any folder on the computer, for AI agents, exposed as MCP tools through the AI Ecosystem core: `search`, `find`, `get_section`, `get_note`, `read_table`, `list_folders`, `list_files`, `list_tags` and `recent_notes`.
+Fast in-memory search (note graph + Markdown sections, ranked with BM25 over an index kept up to date by Obsidian events) over the Obsidian vault and over any folder on the computer, for AI agents, exposed as MCP tools through the AI Ecosystem core: `search`, `find`, `get_section`, `get_note`, `read_table`, `list_folders`, `list_files`, `list_tags` and `recent_notes`.
 
 ## Universal search
 
@@ -37,8 +37,8 @@ Examples:
 
 ## Response format, pagination and safety
 
-- **Lean by default:** each result has path, line, a 120-character snippet and the section. `detalhe: true` returns the long response.
-- **`compacto: true`:** ripgrep-style text. Empty results show `0 resultados` with hints; `+N` means there is more.
+- **Compact by default (`compacto: true`):** `search` and `find` return ripgrep-style text (`caminho:linha:trecho`). Empty results show `0 resultados` with hints; `+N` means there is more.
+- **JSON when you ask for it:** `compacto: false` returns the lean JSON (path, line, a 120-character snippet and the section). `detalhe: true` returns the long JSON response and `ler: true` also falls back to JSON, since compact text cannot carry those fields.
 - **`ler: true`:** the first result also returns the section where the term matched.
 - **Pagination:** use `offset` to get the next page; the `restantes` field tells how many results remain.
 - **Universal search:** the default limit is 10. When results are cut, `truncado` is set and hints explain how to continue.

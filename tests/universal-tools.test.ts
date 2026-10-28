@@ -35,7 +35,7 @@ describe("universal search, find and legacy aliases", () => {
     const app = fakeVault([]);
     const tools = createSearchTools(app, new VaultSearchEngine(app));
 
-    const res = await executar(tools, "search", { pasta: dir, extensoes: ["ts"], termos: ["alvo"] });
+    const res = await executar(tools, "search", { pasta: dir, extensoes: ["ts"], termos: ["alvo"], compacto: false });
     const json = JSON.parse(textoDe(res));
 
     expect(json.total).toBe(1);
@@ -46,7 +46,7 @@ describe("universal search, find and legacy aliases", () => {
     const app = fakeVault([]);
     const tools = createSearchTools(app, new VaultSearchEngine(app));
 
-    const res = await executar(tools, "find", { query: "x", pasta: dir, extensoes: ["ts"] });
+    const res = await executar(tools, "find", { query: "x", pasta: dir, extensoes: ["ts"], compacto: false });
     const json = JSON.parse(textoDe(res));
 
     const caminhos = (json.resultados as Array<{ caminho: string }>).map((r) => r.caminho);
@@ -87,7 +87,7 @@ describe("universal search, find and legacy aliases", () => {
     ]);
     const tools = createSearchTools(app, new VaultSearchEngine(app));
 
-    const res = await executar(tools, "search", { termos: ["acesso"] });
+    const res = await executar(tools, "search", { termos: ["acesso"], compacto: false });
     const json = JSON.parse(textoDe(res));
 
     expect(json.total).toBe(1);

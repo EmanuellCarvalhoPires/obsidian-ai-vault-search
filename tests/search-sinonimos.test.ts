@@ -60,17 +60,17 @@ describe("tool search expoe sinonimos e exato", () => {
   }
 
   it("sem opcoes, 'fluxo' devolve total 2 (B e C)", async () => {
-    const r = await chamarSearch({ termos: ["fluxo"] });
+    const r = await chamarSearch({ termos: ["fluxo"], compacto: false });
     expect(r.total).toBe(2);
   });
 
   it("com sinonimos: true, 'fluxo' devolve total 3", async () => {
-    const r = await chamarSearch({ termos: ["fluxo"], sinonimos: true });
+    const r = await chamarSearch({ termos: ["fluxo"], sinonimos: true, compacto: false });
     expect(r.total).toBe(3);
   });
 
   it("com exato: true, 'fluxo' devolve total 1", async () => {
-    const r = await chamarSearch({ termos: ["fluxo"], exato: true });
+    const r = await chamarSearch({ termos: ["fluxo"], exato: true, compacto: false });
     expect(r.total).toBe(1);
   });
 

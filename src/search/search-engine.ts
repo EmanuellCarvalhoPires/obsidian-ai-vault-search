@@ -402,7 +402,7 @@ export class VaultSearchEngine {
     const pasta = (params.pasta || "").trim().replace(/\/$/, "");
     const limite = params.limite && params.limite > 0 ? params.limite : 10;
     const offset = Math.max(0, Math.floor(params.offset ?? 0));
-    const ext = (params.extensao || "md").toLowerCase();
+    const ext = (params.extensao ?? "").trim().toLowerCase() || "md";
 
     let files =
       ext === "md"
@@ -608,23 +608,25 @@ export class VaultSearchEngine {
   }
 
   // Pasta pedida sem diferenciar maiúsculas nem barras; se não existir, sugere as parecidas.
-  private resolverPasta(pasta: string): { real?: string; sugestoes: string[] } {
+  private resolverPasta(pasta: string): { real?: string; sugestoes: string[]; excluida?: boolean } {
     const alvo = pasta.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
     if (alvo === "") return { real: "", sugestoes: [] };
 
-    const pastas = this.app.vault
+    const todas = this.app.vault
       .getAllLoadedFiles()
-      .filter((f) => f instanceof TFolder && f.path !== "/" && f.path !== "" && !this.ignored(f.path))
+      .filter((f) => f instanceof TFolder && f.path !== "/" && f.path !== "")
       .map((f) => f.path);
+    const pastas = todas.filter((p) => !this.ignored(p));
 
-    const exata = pastas.find((p) => p === alvo);
-    if (exata !== undefined) return { real: exata, sugestoes: [] };
-    const semCaixa = pastas.find((p) => p.toLowerCase() === alvo.toLowerCase());
-    if (semCaixa !== undefined) return { real: semCaixa, sugestoes: [] };
+    const visivel = pastas.find((p) => p === alvo) ?? pastas.find((p) => p.toLowerCase() === alvo.toLowerCase());
+    if (visivel !== undefined) return { real: visivel, sugestoes: [] };
+    // Pasta que existe mas está excluída nas configurações: diz isso, em vez de "não encontrada".
+    if (todas.some((p) => p.toLowerCase() === alvo.toLowerCase())) return { sugestoes: [], excluida: true };
     return { sugestoes: maisParecidos(alvo, pastas, 5) };
   }
 
-  private dicasPastaNaoEncontrada(pasta: string, sugestoes: string[]): string[] {
+  private dicasPastaNaoEncontrada(pasta: string, sugestoes: string[], excluida = false): string[] {
+    if (excluida) return [`Pasta excluída nas configurações do AI Vault Search: ${pasta}`];
     return [
       `Pasta não encontrada: ${pasta}`,
       ...(sugestoes.length > 0 ? [`Parecidas: ${sugestoes.join(", ")}`] : []),
@@ -779,7 +781,7 @@ export class VaultSearchEngine {
     // -------------------------------------------------------------
     if (acao === "listar_arquivos") {
       const pasta = params.pasta || "";
-      const ext = (params.extensao || "md").toLowerCase();
+      const ext = (params.extensao ?? "").trim().toLowerCase() || "md";
       const recursivo = params.recursivo === true;
       const limite = params.limite || 50;
 
@@ -793,7 +795,7 @@ export class VaultSearchEngine {
             total: 0,
             tempo_ms: Date.now() - startTime,
             resultados: [],
-            dicas: this.dicasPastaNaoEncontrada(pasta, resolvida.sugestoes),
+            dicas: this.dicasPastaNaoEncontrada(pasta, resolvida.sugestoes, resolvida.excluida),
           };
         }
         pastaExiste = true;

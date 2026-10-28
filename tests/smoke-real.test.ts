@@ -46,7 +46,7 @@ describe("smoke real: tools against the plugin source tree", () => {
     const tools = createSearchTools(app, new VaultSearchEngine(app));
 
     const inicio = performance.now();
-    const res = await executar(tools, "search", { termos: ["createSearchTools"], extensoes: ["ts"], pasta: pastaSrc });
+    const res = await executar(tools, "search", { termos: ["createSearchTools"], extensoes: ["ts"], pasta: pastaSrc, compacto: false });
     const duracao = performance.now() - inicio;
     const json = JSON.parse(textoDe(res));
 
@@ -59,7 +59,7 @@ describe("smoke real: tools against the plugin source tree", () => {
     const tools = createSearchTools(app, new VaultSearchEngine(app));
 
     const inicio = performance.now();
-    const res = await executar(tools, "find", { query: "search-tools", pasta: pastaSrc });
+    const res = await executar(tools, "find", { query: "search-tools", pasta: pastaSrc, compacto: false });
     const duracao = performance.now() - inicio;
     const json = JSON.parse(textoDe(res));
 

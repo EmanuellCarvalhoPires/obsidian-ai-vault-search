@@ -83,7 +83,7 @@ describe("tool responses", () => {
 
   it("empty result keeps total and resultados", async () => {
     const { call } = setup();
-    const { json } = await call("search", {termos: ["inexistente"] });
+    const { json } = await call("search", {termos: ["inexistente"], compacto: false });
     expect(json.total).toBe(0);
     expect(json.resultados).toEqual([]);
   });
@@ -125,5 +125,26 @@ describe("tool responses", () => {
     expect(res.structuredContent).toBeUndefined();
     expect(text.startsWith("{")).toBe(false);
     expect(text).toContain("MOC - Tools.md");
+  });
+
+  it("search without compacto defaults to ripgrep plain text", async () => {
+    const { call } = setup();
+    const { text } = await call("search", { termos: ["acesso"] });
+    expect(text.startsWith("{")).toBe(false);
+    expect(text).toContain("Fluxos/Fluxo A.md:");
+  });
+
+  it("find without compacto defaults to ripgrep plain text", async () => {
+    const { call } = setup();
+    const { text } = await call("find", { query: "Tools" });
+    expect(text.startsWith("{")).toBe(false);
+    expect(text).toContain("MOC - Tools.md");
+  });
+
+  it("search with compacto: false returns JSON", async () => {
+    const { call } = setup();
+    const { text, json } = await call("search", { termos: ["acesso"], compacto: false });
+    expect(() => JSON.parse(text)).not.toThrow();
+    expect(json.total).toBe(1);
   });
 });

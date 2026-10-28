@@ -80,7 +80,7 @@ describe("search tool: arvore", () => {
   const search = tools.find((t) => t.name === "search")!;
 
   it("returns only Cat with profundidade 1", async () => {
-    const res = await search.handler({ arvore: "Raiz", profundidade: 1 }, {} as never);
+    const res = await search.handler({ arvore: "Raiz", profundidade: 1, compacto: false }, {} as never);
     const json = JSON.parse(textoDe(res));
 
     expect(json.total).toBe(1);
@@ -94,7 +94,7 @@ describe("search tool: arvore", () => {
   });
 
   it("with no arguments returns total 0 and a hint asking for a criterion", async () => {
-    const res = await search.handler({}, {} as never);
+    const res = await search.handler({ compacto: false }, {} as never);
     const json = JSON.parse(textoDe(res));
 
     expect(json.total).toBe(0);

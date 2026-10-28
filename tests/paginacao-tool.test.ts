@@ -32,19 +32,19 @@ async function chamar(nome: string, args: Record<string, unknown>): Promise<Reco
 
 describe("search com offset", () => {
   it("offset 20 com limite 10 traz 5 resultados", async () => {
-    const json = await chamar("search", { termos: ["alvo"], limite: 10, offset: 20 });
+    const json = await chamar("search", { termos: ["alvo"], limite: 10, offset: 20, compacto: false });
     expect((json.resultados as unknown[]).length).toBe(5);
   });
 
   it("sem offset e com limite 10 traz restantes 15", async () => {
-    const json = await chamar("search", { termos: ["alvo"], limite: 10 });
+    const json = await chamar("search", { termos: ["alvo"], limite: 10, compacto: false });
     expect(json.restantes).toBe(15);
   });
 });
 
 describe("find de notas com offset", () => {
   it("offset 5 com limite 5 traz 5 resultados e restantes", async () => {
-    const json = await chamar("find", { query: "N", limite: 5, offset: 5 });
+    const json = await chamar("find", { query: "N", limite: 5, offset: 5, compacto: false });
     expect((json.resultados as unknown[]).length).toBe(5);
     expect(json.restantes).toBe(15);
   });
@@ -64,13 +64,13 @@ describe("find universal com offset", () => {
   });
 
   it("offset 10 com limite 5 traz 2 resultados e sem restantes", async () => {
-    const json = await chamar("find", { query: "arq", pasta: dir, extensoes: ["txt"], limite: 5, offset: 10 });
+    const json = await chamar("find", { query: "arq", pasta: dir, extensoes: ["txt"], limite: 5, offset: 10, compacto: false });
     expect((json.resultados as unknown[]).length).toBe(2);
     expect(json.restantes).toBeUndefined();
   });
 
   it("offset 0 com limite 5 traz restantes 7", async () => {
-    const json = await chamar("find", { query: "arq", pasta: dir, extensoes: ["txt"], limite: 5, offset: 0 });
+    const json = await chamar("find", { query: "arq", pasta: dir, extensoes: ["txt"], limite: 5, offset: 0, compacto: false });
     expect(json.restantes).toBe(7);
   });
 });

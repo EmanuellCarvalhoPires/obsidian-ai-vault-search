@@ -44,7 +44,7 @@ function schemaDe(tool: HubTool): Record<string, Record<string, unknown>> {
 describe("detalhe na tool search", () => {
   it("sem detalhe, o trecho da seção não vem", async () => {
     const { json } = setup();
-    const res = await json("search", { termos: ["acesso"] });
+    const res = await json("search", { termos: ["acesso"], compacto: false });
     expect(res.resultados[0].secao_trecho).toBeUndefined();
   });
 
@@ -129,7 +129,7 @@ describe("resposta enxuta (enxugar)", () => {
 describe("resposta enxuta pela tool", () => {
   it("search sem detalhe não traz consulta, pontos nem nome, e não agrupa", async () => {
     const { json } = setup();
-    const res = await json("search", { termos: ["acesso"] });
+    const res = await json("search", { termos: ["acesso"], compacto: false });
     expect(res).not.toHaveProperty("consulta");
     expect(res.resultados[0].pontos).toBeUndefined();
     expect(res.resultados[0].nome).toBeUndefined();
@@ -146,7 +146,7 @@ describe("resposta enxuta pela tool", () => {
 
   it("find sem detalhe não traz pontos, modificada nem nome", async () => {
     const { json } = setup();
-    const res = await json("find", { query: "Fluxo" });
+    const res = await json("find", { query: "Fluxo", compacto: false });
     expect(res.resultados[0].pontos).toBeUndefined();
     expect(res.resultados[0].modificada).toBeUndefined();
     expect(res.resultados[0].nome).toBeUndefined();
@@ -170,7 +170,7 @@ describe("busca universal agrupada pela tool", () => {
     const app = fakeVault([]);
     const tools = createSearchTools(app, new VaultSearchEngine(app));
     const res = await tools.find((t) => t.name === "search")!.handler(
-      { pasta: dir, extensoes: ["ts"], termos: ["alvo"] },
+      { pasta: dir, extensoes: ["ts"], termos: ["alvo"], compacto: false },
       {} as never,
     );
     const json = JSON.parse(textoDe(res)) as Resposta;

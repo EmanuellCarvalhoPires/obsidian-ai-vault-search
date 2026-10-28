@@ -61,7 +61,7 @@ describe("search tool: ler", () => {
   });
 
   it("sem ler, nenhum resultado traz conteudo", async () => {
-    const res = await search.handler({ termos: ["acesso"] }, {} as never);
+    const res = await search.handler({ termos: ["acesso"], compacto: false }, {} as never);
     const json = JSON.parse((res.content[0] as { text: string }).text) as { resultados: { conteudo?: string }[] };
     expect(json.resultados.every((r) => r.conteudo === undefined)).toBe(true);
   });
