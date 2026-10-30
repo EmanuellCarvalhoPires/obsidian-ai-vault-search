@@ -20,8 +20,6 @@ export default class AIVaultSearchPlugin extends Plugin {
   private tools: HubTool[] = [];
 
   async onload(): Promise<void> {
-    console.log("[AI Vault Search] Carregando plugin...");
-
     this.config = loadSettings(await this.loadData());
     this.engine = new VaultSearchEngine(this.app);
     this.engine.setExcludedFolders(this.config.pastasForaDoIndice);
@@ -74,13 +72,12 @@ export default class AIVaultSearchPlugin extends Plugin {
         this.unregisterSetupHandler?.();
         this.unregisterSetupHandler = undefined;
       },
-      onStatus: (status, detail) => {
-        console.log(`[AI Vault Search] Status do AI Ecosystem: ${status}`, detail || "");
+      onStatus: () => {
+        // Sem log de status.
       },
     });
 
     this.connector.start();
-    console.log("[AI Vault Search] Plugin carregado e registrado no AI Ecosystem.");
   }
 
   onunload(): void {
@@ -89,7 +86,6 @@ export default class AIVaultSearchPlugin extends Plugin {
     if (this.connector) {
       this.connector.stop();
     }
-    console.log("[AI Vault Search] Plugin descarregado.");
   }
 
   private registerSetupHandler(api: AIEcosystemAPI): void {

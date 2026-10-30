@@ -98,7 +98,7 @@ async function lerConteudo(
     return { tipo, abas };
   }
 
-  const texto = (await readFile(abs, "utf8")).replace(/^﻿/, "");
+  const texto = (await readFile(abs, "utf8")).replace(/^\uFEFF/, "");
   const linhas = texto.split(/\r?\n/);
   if (ext === "csv" || ext === "tsv") {
     const { linhas: celulas } = parseDelimited(texto);

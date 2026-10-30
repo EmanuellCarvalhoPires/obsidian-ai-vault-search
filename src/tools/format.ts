@@ -47,7 +47,7 @@ export function enxugar(payload: SearchResultPayload, detalhe: boolean, agrupar 
 function isEmpty(v: unknown): boolean {
   if (v === undefined || v === null || v === "") return true;
   if (Array.isArray(v)) return v.length === 0;
-  if (typeof v === "object") return Object.keys(v as object).length === 0;
+  if (typeof v === "object") return Object.keys(v).length === 0;
   return false;
 }
 
@@ -99,7 +99,7 @@ export function formatRipgrep(resultados: Array<{
  * Com resultados: as linhas e, no fim, "+N" com os que não couberam.
  */
 export function ripgrepResult(payload: {
-  resultados?: any[];
+  resultados?: Parameters<typeof formatRipgrep>[0];
   total?: number;
   dicas?: string[];
   restantes?: number;

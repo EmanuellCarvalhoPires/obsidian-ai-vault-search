@@ -94,9 +94,9 @@ function contarTermos(linhaNormalizada: string, termos: TermoConsulta[], exato: 
   return total;
 }
 
-function isIgnored(path: string): boolean {
+function isIgnored(path: string, configDir = ".obsidian"): boolean {
   return (
-    path.startsWith(".obsidian") ||
+    path.startsWith(configDir) ||
     path.startsWith(".trash") ||
     path.startsWith(".git") ||
     path.startsWith(".claude") ||
@@ -122,7 +122,7 @@ export class VaultSearchEngine {
   }
 
   private ignored(path: string): boolean {
-    return isIgnored(path) || isExcluded(path, this.excludedFolders);
+    return isIgnored(path, this.app.vault.configDir) || isExcluded(path, this.excludedFolders);
   }
 
   /** Markdown notes the search can see (same set the "buscar" action reads). */

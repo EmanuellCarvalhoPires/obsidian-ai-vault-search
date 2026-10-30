@@ -22,7 +22,7 @@ export function ehCaminhoBloqueado(caminho: string): boolean {
 }
 
 // Known token shapes replaced by the mark. Bearer keeps its word, so it is handled apart.
-const BEARER = /\bBearer\s+[A-Za-z0-9._~+\/=-]{16,}/gi;
+const BEARER = /\bBearer\s+[A-Za-z0-9._~+/=-]{16,}/gi;
 const SEGREDOS: RegExp[] = [
   /sk-ant-[A-Za-z0-9_-]{8,}/g,
   /\bgh[pousr]_[A-Za-z0-9]{20,}/g,
